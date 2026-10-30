@@ -30,7 +30,27 @@ if (Test-Path $ConfigPath) {
     } catch {}
 }
 
-if ([string]::IsNullOrWhiteSpace($TailscaleIP)) { $TailscaleIP = "전용PC_IP" }
+if ([string]::IsNullOrWhiteSpace($TailscaleIP)) {
+    try {
+        $UdpSocket = New-Object System.Net.Sockets.Socket([System.Net.Sockets.AddressFamily]::InterNetwork, [System.Net.Sockets.SocketType]::Dgram, 0)
+        $UdpSocket.Connect("8.8.8.8", 65530)
+        $LocalEndPoint = [System.Net.IPEndPoint]$UdpSocket.LocalEndPoint
+        $DetectedIp = $LocalEndPoint.Address.ToString()
+        $UdpSocket.Close()
+        if ($DetectedIp -and -not $DetectedIp.StartsWith("127.") -and -not $DetectedIp.StartsWith("169.254.")) {
+            $TailscaleIP = $DetectedIp
+        }
+    } catch {}
+}
+if ([string]::IsNullOrWhiteSpace($TailscaleIP)) {
+    try {
+        $FallbackIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and $_.PrefixOrigin -ne 'WellKnown' } |
+            Select-Object -First 1 -ExpandProperty IPAddress)
+        if ($FallbackIp) { $TailscaleIP = $FallbackIp }
+    } catch {}
+}
+if ([string]::IsNullOrWhiteSpace($TailscaleIP)) { $TailscaleIP = $env:COMPUTERNAME }
 
 if ([string]::IsNullOrWhiteSpace($SlackBotToken) -or [string]::IsNullOrWhiteSpace($SlackChannelId)) {
     Write-Warning "SLACK_BOT_TOKEN 또는 SLACK_CHANNEL_ID가 설정되지 않아 Slack 전송을 건너뜁니다."

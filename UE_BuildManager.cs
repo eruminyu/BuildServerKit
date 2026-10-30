@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -17,8 +18,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.4.0")]
-[assembly: AssemblyFileVersion("1.0.4.0")]
+[assembly: AssemblyVersion("1.0.5.0")]
+[assembly: AssemblyFileVersion("1.0.5.0")]
 
 namespace BuildServerKit
 {
@@ -1358,9 +1359,9 @@ namespace BuildServerKit
 
             txtSlackToken = AddTextSettingRow(page, "Slack Bot Token (xoxb-...):", config.SlackBotToken, ref sy, true);
             txtSlackChannel = AddTextSettingRow(page, "Slack 채널 ID (예: C01234...):", config.SlackChannelId, ref sy);
-            txtTailscaleIP = AddTextSettingRow(page, "전용 PC Tailscale IP:", config.TailscaleIP, ref sy);
+            txtTailscaleIP = AddTextSettingRow(page, "전용 PC IP (비워두면 자동감지):", config.TailscaleIP, ref sy);
 
-            Button btnDetectTailscale = CreateFlatButton("이 PC의 Tailscale IP(100.x.y.z) 자동 감지", new Point(210, sy), new Size(310, 34), BgInput);
+            Button btnDetectTailscale = CreateFlatButton("이 PC의 IPv4 / Tailscale IP 자동 감지 확인", new Point(210, sy), new Size(310, 34), BgInput);
             btnDetectTailscale.Click += (s, e) => DetectTailscaleIP();
 
             Button btnTestSlack = CreateFlatButton("Slack 연동 테스트 메시지 보내기", new Point(530, sy), new Size(260, 34), AccentBlue);
@@ -3029,8 +3030,8 @@ namespace BuildServerKit
                 try
                 {
                     string modeLabel = (mode == "QuickVerify") ? "빠른 컴파일·쿠킹 검증" : "전체 패키징 빌드";
-                    string tsIp = string.IsNullOrWhiteSpace(config.TailscaleIP) ? "전용PC_IP" : config.TailscaleIP;
-                    string sharedPath = archiveDir.Replace(@"C:\BuildArchive", @"\\" + tsIp + @"\BuildArchive");
+                    string tsIp = GetServerIPv4ForSlack();
+                    string sharedPath = Regex.Replace(archiveDir, @"^[A-Za-z]:\\BuildArchive", @"\\" + tsIp + @"\BuildArchive", RegexOptions.IgnoreCase);
 
                     if (exitCode == 0)
                     {
@@ -3188,25 +3189,94 @@ namespace BuildServerKit
                 MessageBox.Show("해당 로그 파일이 존재하지 않습니다:\n" + file, "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        private void DetectTailscaleIP()
+        private string GetServerIPv4ForSlack()
         {
+            if (!string.IsNullOrWhiteSpace(config.TailscaleIP))
+                return config.TailscaleIP.Trim();
+
+            string detected = DetectActiveIPv4Address();
+            return !string.IsNullOrWhiteSpace(detected) ? detected : Environment.MachineName;
+        }
+
+        private string DetectActiveIPv4Address()
+        {
+            // 1순위: OS 라우팅 테이블 기준 실제 외부/내부망 통신에 사용 중인 주 IPv4 주소 조회 (패킷 전송 없음)
+            try
+            {
+                using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0))
+                {
+                    socket.Connect("8.8.8.8", 65530);
+                    IPEndPoint endPoint = socket.LocalEndPoint as IPEndPoint;
+                    if (endPoint != null)
+                    {
+                        string routeIp = endPoint.Address.ToString();
+                        if (!string.IsNullOrWhiteSpace(routeIp) && !routeIp.StartsWith("127.") && !routeIp.StartsWith("169.254."))
+                            return routeIp;
+                    }
+                }
+            }
+            catch { }
+
+            // 2순위: 활성화된(Up) 네트워크 인터페이스 중 게이트웨이가 있는 실제 LAN IPv4 주소 탐색
             try
             {
                 foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
                 {
-                    foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                    if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                        continue;
+
+                    var ipProps = ni.GetIPProperties();
+                    bool hasGateway = ipProps.GatewayAddresses != null && ipProps.GatewayAddresses.Count > 0;
+                    if (!hasGateway) continue;
+
+                    foreach (var ua in ipProps.UnicastAddresses)
                     {
-                        string ip = ua.Address.ToString();
-                        if (ip.StartsWith("100."))
+                        if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
                         {
-                            txtTailscaleIP.Text = ip;
-                            SaveConfigFromUI();
-                            MessageBox.Show("Tailscale IP가 자동으로 감지되었습니다: " + ip, "감지 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                            return;
+                            string ip = ua.Address.ToString();
+                            if (!ip.StartsWith("127.") && !ip.StartsWith("169.254."))
+                                return ip;
                         }
                     }
                 }
-                MessageBox.Show("현재 PC에서 100.x.y.z 대역의 Tailscale IP를 찾지 못했습니다.\nTailscale이 설치 및 로그인되어 있는지 확인해 주세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                // 3순위: 게이트웨이 유무와 무관하게 Up 상태인 IPv4 주소 (Tailscale 100.x.y.z 또는 사설망 IP)
+                foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback)
+                        continue;
+
+                    foreach (var ua in ni.GetIPProperties().UnicastAddresses)
+                    {
+                        if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
+                        {
+                            string ip = ua.Address.ToString();
+                            if (!ip.StartsWith("127.") && !ip.StartsWith("169.254."))
+                                return ip;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return "";
+        }
+
+        private void DetectTailscaleIP()
+        {
+            try
+            {
+                string activeIpv4 = DetectActiveIPv4Address();
+                if (!string.IsNullOrWhiteSpace(activeIpv4))
+                {
+                    MessageBox.Show(
+                        "현재 빌드 서버 장치에서 자동 감지된 IPv4 주소:\n\n" +
+                        "▶ " + activeIpv4 + "\n\n" +
+                        "(입력 칸을 비워 두셔도 빌드 완료 시 위 IPv4 주소를 자동으로 읽어와 Slack 메시지의 공유 폴더 경로에 넣어 전송합니다!)",
+                        "장치 IPv4 자동 감지 확인", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                MessageBox.Show("현재 PC에서 활성화된 IPv4 네트워크 주소를 찾지 못했습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
