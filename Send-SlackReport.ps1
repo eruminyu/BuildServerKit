@@ -55,7 +55,7 @@ if ($ExitCode -eq 0) {
 # ==============================================================================
 # 2. 실패(Error) 발생 시: 에러 발생 당시 핵심 로그 추출
 # ==============================================================================
-$ErrorPattern = "error C\d+:|\bfatal error\b|Error:|Ensure condition failed|AutomationTool exiting with ExitCode"
+$ErrorPattern = "error C\d+:|\bfatal error\b|Error:|Ensure condition failed|Unable to find plugin|Result: Failed|UnrealBuildTool failed|AutomationTool exiting with ExitCode"
 $ExtractedErrors = Select-String -Path $UATLogFile -Pattern $ErrorPattern -Context 1, 2 -ErrorAction SilentlyContinue |
     Select-Object -Last 25 |
     ForEach-Object { $_.Line.Trim() }

@@ -17,8 +17,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.4.0")]
+[assembly: AssemblyFileVersion("1.0.4.0")]
 
 namespace BuildServerKit
 {
@@ -898,7 +898,11 @@ namespace BuildServerKit
                 FlatStyle = FlatStyle.Flat,
                 Text = config.LastBranch
             };
-            cboBranch.SelectedIndexChanged += (s, e) => CheckSelectedBranchWorkflowAsync(cboBranch.Text.Trim());
+            cboBranch.SelectedIndexChanged += (s, e) =>
+            {
+                CheckSelectedBranchWorkflowAsync(cboBranch.Text.Trim());
+                UpdateCommitBanner();
+            };
 
             btnRefreshBranches = CreateFlatButton("↻ 목록 갱신", new Point(260, y - 1), new Size(100, 27), BgInput);
             btnRefreshBranches.Click += (s, e) => FetchBranchList();
@@ -1882,7 +1886,7 @@ namespace BuildServerKit
             fullConsoleBuffer.AppendLine(line);
 
             Color c = color ?? FgText;
-            bool isError = Regex.IsMatch(line, @"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|AutomationTool exiting with ExitCode=[1-9]", RegexOptions.IgnoreCase);
+            bool isError = Regex.IsMatch(line, @"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|Unable to find plugin|Result: Failed|UnrealBuildTool failed|AutomationTool exiting with ExitCode=[1-9]", RegexOptions.IgnoreCase);
             bool isWarn = !isError && Regex.IsMatch(line, @"warning C\d+:|\bWarning:", RegexOptions.IgnoreCase);
 
             if (isError) c = Color.FromArgb(255, 95, 95);
@@ -1916,26 +1920,131 @@ namespace BuildServerKit
 
         private void UpdateCommitBanner()
         {
-            try
+            string uiBranch = (cboBranch != null && !string.IsNullOrWhiteSpace(cboBranch.Text)) ? cboBranch.Text.Trim() : config.LastBranch;
+            Task.Run(() =>
             {
-                if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(Path.Combine(config.ProjectDir, ".git")))
+                try
                 {
-                    if (!string.IsNullOrWhiteSpace(config.ConnectedRepoFullName))
-                        lblCommitInfo.Text = string.Format("연결된 저장소: [{0}] — [[2] 연결된 저장소를 워크스페이스에 최초 Clone]을 눌러 클론하세요.", config.ConnectedRepoFullName);
-                    else
-                        lblCommitInfo.Text = "연결된 저장소 없음 — 좌측 [GitHub 로그인 & 사용할 저장소 선택하기]를 눌러 시작하세요.";
-                    return;
+                    bool hasLocalGit = !string.IsNullOrWhiteSpace(config.ProjectDir) && Directory.Exists(Path.Combine(config.ProjectDir, ".git"));
+                    if (!hasLocalGit && string.IsNullOrWhiteSpace(config.ConnectedRepoFullName))
+                    {
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            lblCommitInfo.Text = "연결된 저장소 없음 — 좌측 [GitHub 로그인 & 사용할 저장소 선택하기]를 눌러 시작하세요.";
+                        }));
+                        return;
+                    }
+
+                    string branch, hash, author, msg;
+                    ResolveCommitMetadata(uiBranch, out branch, out hash, out author, out msg);
+
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        lblCommitInfo.Text = string.Format("워크스페이스: [{0}] {1} ({2}) - {3}", branch, hash, author, msg);
+                    }));
                 }
-                string branch = RunGitQuick("rev-parse --abbrev-ref HEAD");
-                string hash = RunGitQuick("rev-parse --short HEAD");
-                string author = RunGitQuick("log -1 --pretty=format:\"%an\"");
-                string msg = RunGitQuick("log -1 --pretty=format:\"%s\"");
-                lblCommitInfo.Text = string.Format("워크스페이스: [{0}] {1} ({2}) - {3}", branch, hash, author, msg);
-            }
-            catch
+                catch
+                {
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        lblCommitInfo.Text = "Git 커밋 정보를 읽을 수 없습니다.";
+                    }));
+                }
+            });
+        }
+
+        private void ResolveCommitMetadata(string requestedBranch, out string resolvedBranch, out string hash, out string author, out string msg)
+        {
+            resolvedBranch = !string.IsNullOrWhiteSpace(requestedBranch) ? requestedBranch.Trim() : "";
+            hash = "";
+            author = "";
+            msg = "";
+
+            if (!string.IsNullOrWhiteSpace(config.ProjectDir) && Directory.Exists(Path.Combine(config.ProjectDir, ".git")))
             {
-                lblCommitInfo.Text = "Git 커밋 정보를 읽을 수 없습니다.";
+                string localBranch = RunGitQuick("rev-parse --abbrev-ref HEAD");
+                if (string.IsNullOrWhiteSpace(resolvedBranch) && !string.IsNullOrWhiteSpace(localBranch) && localBranch != "HEAD")
+                {
+                    resolvedBranch = localBranch;
+                }
+                hash = RunGitQuick("rev-parse --short HEAD");
+                author = RunGitQuick("log -1 --pretty=format:%an");
+                msg = RunGitQuick("log -1 --pretty=format:%s");
             }
+
+            if (string.IsNullOrWhiteSpace(resolvedBranch))
+            {
+                resolvedBranch = !string.IsNullOrWhiteSpace(config.LastBranch) ? config.LastBranch : "main";
+            }
+
+            // 로컬 Git에서 소유권(safe.directory) 문제나 미동기화로 커밋 정보를 가져오지 못한 경우 GitHub Commits API로 즉시 보완
+            if ((string.IsNullOrWhiteSpace(hash) || string.IsNullOrWhiteSpace(author) || string.IsNullOrWhiteSpace(msg)) &&
+                !string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) &&
+                !string.IsNullOrWhiteSpace(config.GitHubAccessToken))
+            {
+                try
+                {
+                    string apiUrl = string.Format("https://api.github.com/repos/{0}/commits/{1}",
+                        config.ConnectedRepoFullName, Uri.EscapeDataString(resolvedBranch));
+                    string json = GitHubApiGet(apiUrl, config.GitHubAccessToken);
+                    var serializer = new JavaScriptSerializer();
+                    var dict = serializer.Deserialize<Dictionary<string, object>>(json);
+                    if (dict != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(hash) && dict.ContainsKey("sha") && dict["sha"] != null)
+                        {
+                            string fullSha = dict["sha"].ToString();
+                            hash = fullSha.Length > 7 ? fullSha.Substring(0, 7) : fullSha;
+                        }
+
+                        string apiAuthorName = "";
+                        string apiAuthorLogin = "";
+                        if (dict.ContainsKey("commit") && dict["commit"] is Dictionary<string, object>)
+                        {
+                            var commitObj = (Dictionary<string, object>)dict["commit"];
+                            if (string.IsNullOrWhiteSpace(msg) && commitObj.ContainsKey("message") && commitObj["message"] != null)
+                            {
+                                string rawMsg = commitObj["message"].ToString();
+                                msg = rawMsg.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+                            }
+                            if (commitObj.ContainsKey("author") && commitObj["author"] is Dictionary<string, object>)
+                            {
+                                var commitAuthorObj = (Dictionary<string, object>)commitObj["author"];
+                                if (commitAuthorObj.ContainsKey("name") && commitAuthorObj["name"] != null)
+                                    apiAuthorName = commitAuthorObj["name"].ToString();
+                            }
+                        }
+                        if (dict.ContainsKey("author") && dict["author"] is Dictionary<string, object>)
+                        {
+                            var ghAuthorObj = (Dictionary<string, object>)dict["author"];
+                            if (ghAuthorObj.ContainsKey("login") && ghAuthorObj["login"] != null)
+                                apiAuthorLogin = ghAuthorObj["login"].ToString();
+                        }
+
+                        if (string.IsNullOrWhiteSpace(author))
+                        {
+                            if (!string.IsNullOrWhiteSpace(apiAuthorName) && !string.IsNullOrWhiteSpace(apiAuthorLogin) &&
+                                !apiAuthorName.Equals(apiAuthorLogin, StringComparison.OrdinalIgnoreCase))
+                            {
+                                author = string.Format("{0} (@{1})", apiAuthorName, apiAuthorLogin);
+                            }
+                            else if (!string.IsNullOrWhiteSpace(apiAuthorLogin))
+                            {
+                                author = apiAuthorLogin;
+                            }
+                            else if (!string.IsNullOrWhiteSpace(apiAuthorName))
+                            {
+                                author = apiAuthorName;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrWhiteSpace(hash)) hash = "latest";
+            if (string.IsNullOrWhiteSpace(author)) author = !string.IsNullOrWhiteSpace(config.GitHubUser) ? config.GitHubUser : Environment.UserName;
+            if (string.IsNullOrWhiteSpace(msg)) msg = "(커밋 메시지 없음)";
         }
 
         private string RunGitQuick(string args)
@@ -1943,22 +2052,29 @@ namespace BuildServerKit
             if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(config.ProjectDir))
                 return "";
 
-            string fullArgs = "-c core.quotepath=false -c i18n.logOutputEncoding=utf-8 " + args;
-            var psi = new ProcessStartInfo("git", fullArgs)
+            try
             {
-                WorkingDirectory = config.ProjectDir,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using (var p = Process.Start(psi))
-            using (var ms = new MemoryStream())
+                string fullArgs = "-c safe.directory=* -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 " + args;
+                var psi = new ProcessStartInfo("git", fullArgs)
+                {
+                    WorkingDirectory = config.ProjectDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                using (var ms = new MemoryStream())
+                {
+                    p.StandardOutput.BaseStream.CopyTo(ms);
+                    p.WaitForExit(4000);
+                    byte[] raw = ms.ToArray();
+                    return EncodingHelper.DecodeSmartBytes(raw, raw.Length).Trim();
+                }
+            }
+            catch
             {
-                p.StandardOutput.BaseStream.CopyTo(ms);
-                p.WaitForExit(4000);
-                byte[] raw = ms.ToArray();
-                return EncodingHelper.DecodeSmartBytes(raw, raw.Length).Trim();
+                return "";
             }
         }
 
@@ -2410,7 +2526,7 @@ namespace BuildServerKit
             string cloneUrl = GetAuthenticatedCloneUrl();
             await Task.Run(() =>
             {
-                RunProcessStream("git", string.Format("-c core.quotepath=false clone \"{0}\" \"{1}\"", cloneUrl, config.ProjectDir), parentDir);
+                RunProcessStream("git", string.Format("-c safe.directory=* -c core.quotepath=false clone \"{0}\" \"{1}\"", cloneUrl, config.ProjectDir), parentDir);
             });
 
             SetStatus("● 대기 중 (IDLE)", Color.FromArgb(52, 58, 64));
@@ -2584,11 +2700,17 @@ namespace BuildServerKit
             {
                 if (!string.IsNullOrWhiteSpace(authedUrl))
                 {
-                    RunGitQuick(string.Format("remote set-url origin \"{0}\"", authedUrl));
+                    string remotes = RunGitQuick("remote");
+                    bool hasOrigin = !string.IsNullOrWhiteSpace(remotes) &&
+                        remotes.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Any(r => r.Trim() == "origin");
+                    if (hasOrigin)
+                        RunGitQuick(string.Format("remote set-url origin \"{0}\"", authedUrl));
+                    else
+                        RunGitQuick(string.Format("remote add origin \"{0}\"", authedUrl));
                 }
-                RunProcessStream("git", "-c core.quotepath=false fetch --all --prune", config.ProjectDir);
-                RunProcessStream("git", "-c core.quotepath=false checkout -f " + branch, config.ProjectDir);
-                RunProcessStream("git", "-c core.quotepath=false reset --hard origin/" + branch, config.ProjectDir);
+                RunProcessStream("git", "-c safe.directory=* -c core.quotepath=false fetch --all --prune", config.ProjectDir);
+                RunProcessStream("git", string.Format("-c safe.directory=* -c core.quotepath=false checkout -B \"{0}\" \"origin/{0}\"", branch), config.ProjectDir);
+                RunProcessStream("git", string.Format("-c safe.directory=* -c core.quotepath=false reset --hard \"origin/{0}\"", branch), config.ProjectDir);
             });
 
             EnsureAssetJunctions(false);
@@ -2651,10 +2773,14 @@ namespace BuildServerKit
 
             EnsureAssetJunctions(false);
 
-            string commitHash = RunGitQuick("rev-parse --short HEAD");
-            string commitAuthor = RunGitQuick("log -1 --pretty=format:\"%an\"");
-            string commitMsg = RunGitQuick("log -1 --pretty=format:\"%s\"");
-            string safeBranch = Regex.Replace(string.IsNullOrWhiteSpace(branch) ? "main" : branch, @"[\\/:*?""<>|]", "_");
+            string resolvedBranch = "";
+            string commitHash = "";
+            string commitAuthor = "";
+            string commitMsg = "";
+            await Task.Run(() => ResolveCommitMetadata(branch, out resolvedBranch, out commitHash, out commitAuthor, out commitMsg));
+            UpdateCommitBanner();
+
+            string safeBranch = Regex.Replace(string.IsNullOrWhiteSpace(resolvedBranch) ? "main" : resolvedBranch, @"[\\/:*?""<>|]", "_");
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
 
             string buildId = string.Format("{0}_{1}_{2}_{3}", timestamp, mode, safeBranch, commitHash);
@@ -2830,7 +2956,7 @@ namespace BuildServerKit
                 byte[] raw = File.ReadAllBytes(logFile);
                 string content = EncodingHelper.DecodeSmartBytes(raw, raw.Length);
                 var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-                var regex = new Regex(@"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|AutomationTool exiting with ExitCode", RegexOptions.IgnoreCase);
+                var regex = new Regex(@"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|Unable to find plugin|Result: Failed|UnrealBuildTool failed|AutomationTool exiting with ExitCode", RegexOptions.IgnoreCase);
                 for (int i = 0; i < lines.Length; i++)
                 {
                     if (regex.IsMatch(lines[i]))
@@ -2851,7 +2977,7 @@ namespace BuildServerKit
         {
             rtbErrorsOnly.Clear();
             var lines = fullConsoleBuffer.ToString().Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-            var regex = new Regex(@"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|AutomationTool exiting with ExitCode", RegexOptions.IgnoreCase);
+            var regex = new Regex(@"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|Unable to find plugin|Result: Failed|UnrealBuildTool failed|AutomationTool exiting with ExitCode", RegexOptions.IgnoreCase);
             int count = 0;
             foreach (var l in lines)
             {
@@ -2885,12 +3011,15 @@ namespace BuildServerKit
 
             string uproject = FindUProjectFile();
             string projectName = !string.IsNullOrEmpty(uproject) ? Path.GetFileNameWithoutExtension(uproject) : "UEProject";
-            string commitHash = RunGitQuick("rev-parse --short HEAD");
-            string commitAuthor = RunGitQuick("log -1 --pretty=format:\"%an\"");
-            string commitMsg = RunGitQuick("log -1 --pretty=format:\"%s\"");
+            string resolvedBranch = "";
+            string commitHash = "";
+            string commitAuthor = "";
+            string commitMsg = "";
+            string uiBranch = cboBranch.Text.Trim();
+            await Task.Run(() => ResolveCommitMetadata(uiBranch, out resolvedBranch, out commitHash, out commitAuthor, out commitMsg));
 
             AppendConsole("[Slack] 수동 로그 리포트 전송 시작...", Color.Cyan);
-            await SendSlackReportAsync(projectName, 1, currentBuildMode, cboBranch.Text, commitHash, commitAuthor, commitMsg, "수동 전송", currentLogArchiveDir, currentLogFilePath);
+            await SendSlackReportAsync(projectName, 1, currentBuildMode, resolvedBranch, commitHash, commitAuthor, commitMsg, "수동 전송", currentLogArchiveDir, currentLogFilePath);
         }
 
         private async Task SendSlackReportAsync(string projectName, int exitCode, string mode, string branch, string hash, string author, string msg, string duration, string archiveDir, string uatLogFile)

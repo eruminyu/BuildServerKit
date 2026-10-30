@@ -41,12 +41,12 @@ jobs:
           $CloneUrl  = "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           if (-not (Test-Path "$Workspace\.git")) {
               New-Item -ItemType Directory -Force -Path (Split-Path $Workspace) | Out-Null
-              git -c core.quotepath=false clone $CloneUrl $Workspace
+              git -c safe.directory=* -c core.quotepath=false clone $CloneUrl $Workspace
           }
           Set-Location $Workspace
-          git remote set-url origin $CloneUrl
-          git -c core.quotepath=false fetch --all --prune
-          git -c core.quotepath=false checkout -f "${{ github.sha }}"
+          git -c safe.directory=* remote set-url origin $CloneUrl
+          git -c safe.directory=* -c core.quotepath=false fetch --all --prune
+          git -c safe.directory=* -c core.quotepath=false checkout -f "${{ github.sha }}"
 
       - name: 2. 빌드 모드 결정 및 Run-UEBuild.ps1 실행 (로그 저장 & Slack 전송)
         shell: powershell

@@ -56,13 +56,41 @@ $ProjectName  = $UProjectItem.BaseName
 Set-Location $ProjectDir
 
 # ==============================================================================
-# 2. 현재 커밋 메타데이터 수집
+# 2. 현재 커밋 메타데이터 수집 (로컬 Git + GitHub API 자동 폴백)
 # ==============================================================================
-$CommitHash    = (git -c core.quotepath=false rev-parse --short HEAD).Trim()
-$CommitAuthor  = (git -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 log -1 --pretty=format:"%an").Trim()
-$CommitMsg     = (git -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 log -1 --pretty=format:"%s").Trim()
-$TimeStamp     = Get-Date -Format "yyyy-MM-dd_HHmmss"
 $SafeBranch    = ($BranchName -replace '^origin/', '') -replace '[\\/:*?"<>|]', '_'
+$CommitHash    = (git -c safe.directory=* -c core.quotepath=false rev-parse --short HEAD 2>$null)
+if ($CommitHash) { $CommitHash = $CommitHash.Trim() }
+$CommitAuthor  = (git -c safe.directory=* -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 log -1 --pretty=format:"%an" 2>$null)
+if ($CommitAuthor) { $CommitAuthor = $CommitAuthor.Trim() }
+$CommitMsg     = (git -c safe.directory=* -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 log -1 --pretty=format:"%s" 2>$null)
+if ($CommitMsg) { $CommitMsg = $CommitMsg.Trim() }
+
+if (([string]::IsNullOrWhiteSpace($CommitHash) -or [string]::IsNullOrWhiteSpace($CommitAuthor) -or [string]::IsNullOrWhiteSpace($CommitMsg)) -and $Cfg -and $Cfg.ConnectedRepoFullName -and $Cfg.GitHubAccessToken) {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $ApiUrl = "https://api.github.com/repos/$($Cfg.ConnectedRepoFullName)/commits/$([uri]::EscapeDataString($BranchName))"
+        $GhResp = Invoke-RestMethod -Uri $ApiUrl -Headers @{ Authorization = "Bearer $($Cfg.GitHubAccessToken)"; "User-Agent" = "BuildServerKit" } -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($CommitHash) -and $GhResp.sha) {
+            $CommitHash = $GhResp.sha.Substring(0, [Math]::Min(7, $GhResp.sha.Length))
+        }
+        if ([string]::IsNullOrWhiteSpace($CommitAuthor)) {
+            $AName  = $GhResp.commit.author.name
+            $ALogin = $GhResp.author.login
+            if ($AName -and $ALogin -and ($AName -ne $ALogin)) { $CommitAuthor = "$AName (@$ALogin)" }
+            elseif ($ALogin) { $CommitAuthor = $ALogin }
+            elseif ($AName) { $CommitAuthor = $AName }
+        }
+        if ([string]::IsNullOrWhiteSpace($CommitMsg) -and $GhResp.commit.message) {
+            $CommitMsg = ($GhResp.commit.message -split "`r?`n")[0].Trim()
+        }
+    } catch {}
+}
+
+if ([string]::IsNullOrWhiteSpace($CommitHash))   { $CommitHash = "latest" }
+if ([string]::IsNullOrWhiteSpace($CommitAuthor)) { $CommitAuthor = if ($Cfg -and $Cfg.GitHubUser) { $Cfg.GitHubUser } else { $env:USERNAME } }
+if ([string]::IsNullOrWhiteSpace($CommitMsg))    { $CommitMsg = "(커밋 메시지 없음)" }
+$TimeStamp     = Get-Date -Format "yyyy-MM-dd_HHmmss"
 
 # ==============================================================================
 # 3. 이번 빌드의 전수 로그 아카이브 폴더 생성
