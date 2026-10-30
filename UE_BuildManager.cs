@@ -521,6 +521,9 @@ namespace BuildServerKit
         private Button btnConnectGitHub;
         private ComboBox cboBranch;
         private Button btnRefreshBranches;
+        private Label lblWorkflowStatus;
+        private Button btnScanWorkflows;
+        private Button btnPushWorkflow;
         private Button btnGitSync;
         private Button btnQuickVerify;
         private Button btnFullPackage;
@@ -595,6 +598,10 @@ namespace BuildServerKit
             UpdateRunnerStatusUI();
             RefreshHistoryList();
             UpdateCommitBanner();
+            if (!string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) && !string.IsNullOrWhiteSpace(config.GitHubAccessToken))
+            {
+                FetchBranchesViaGitHubApiAsync();
+            }
         }
 
         public static string GitHubApiGet(string url, string token)
@@ -611,15 +618,45 @@ namespace BuildServerKit
                 return sr.ReadToEnd();
         }
 
-        public static string GitHubApiPost(string url, string token)
+        public static string GitHubApiPost(string url, string token, string jsonBody = null)
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = "POST";
             req.UserAgent = "UE-BuildDeploy-Manager";
             req.Accept = "application/vnd.github+json";
-            req.ContentLength = 0;
             if (!string.IsNullOrWhiteSpace(token))
                 req.Headers.Add("Authorization", "Bearer " + token);
+
+            if (!string.IsNullOrEmpty(jsonBody))
+            {
+                byte[] bodyBytes = Encoding.UTF8.GetBytes(jsonBody);
+                req.ContentType = "application/json; charset=utf-8";
+                req.ContentLength = bodyBytes.Length;
+                using (var s = req.GetRequestStream()) s.Write(bodyBytes, 0, bodyBytes.Length);
+            }
+            else
+            {
+                req.ContentLength = 0;
+            }
+
+            using (var resp = req.GetResponse())
+            using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                return sr.ReadToEnd();
+        }
+
+        public static string GitHubApiPut(string url, string token, string jsonBody)
+        {
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.Method = "PUT";
+            req.UserAgent = "UE-BuildDeploy-Manager";
+            req.Accept = "application/vnd.github+json";
+            if (!string.IsNullOrWhiteSpace(token))
+                req.Headers.Add("Authorization", "Bearer " + token);
+
+            byte[] bodyBytes = Encoding.UTF8.GetBytes(jsonBody ?? "{}");
+            req.ContentType = "application/json; charset=utf-8";
+            req.ContentLength = bodyBytes.Length;
+            using (var s = req.GetRequestStream()) s.Write(bodyBytes, 0, bodyBytes.Length);
 
             using (var resp = req.GetResponse())
             using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
@@ -840,6 +877,7 @@ namespace BuildServerKit
                 FlatStyle = FlatStyle.Flat,
                 Text = config.LastBranch
             };
+            cboBranch.SelectedIndexChanged += (s, e) => CheckSelectedBranchWorkflowAsync(cboBranch.Text.Trim());
 
             btnRefreshBranches = CreateFlatButton("↻ 목록 갱신", new Point(260, y - 1), new Size(100, 27), BgInput);
             btnRefreshBranches.Click += (s, e) => FetchBranchList();
@@ -847,7 +885,28 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(lblBr);
             pnlLeft.Controls.Add(cboBranch);
             pnlLeft.Controls.Add(btnRefreshBranches);
-            y += 32;
+            y += 30;
+
+            lblWorkflowStatus = new Label
+            {
+                Text = "○ 브랜치 워크플로우(build.yml): 저장소 연결 후 자동 확인",
+                Location = new Point(14, y),
+                Size = new Size(346, 20),
+                ForeColor = FgSub,
+                Font = new Font("Malgun Gothic", 8.5f, FontStyle.Bold)
+            };
+            pnlLeft.Controls.Add(lblWorkflowStatus);
+            y += 22;
+
+            btnScanWorkflows = CreateFlatButton("▶ 모든 브랜치 build.yml 유무 & Actions 감지 스캔", new Point(14, y), new Size(346, 29), Color.FromArgb(48, 72, 98));
+            btnScanWorkflows.Click += async (s, e) => await ScanAllBranchesForWorkflowAsync(true);
+            pnlLeft.Controls.Add(btnScanWorkflows);
+            y += 33;
+
+            btnPushWorkflow = CreateFlatButton("★ 선택한 브랜치에 build.yml 원클릭 자동 커밋(Push)", new Point(14, y), new Size(346, 29), AccentPurple);
+            btnPushWorkflow.Click += async (s, e) => await PushWorkflowToSelectedBranchAsync();
+            pnlLeft.Controls.Add(btnPushWorkflow);
+            y += 33;
 
             btnGitSync = CreateFlatButton("▼ 선택한 브랜치 최신 커밋 가져오기 (Git Sync)", new Point(14, y), new Size(346, 31), Color.FromArgb(60, 68, 82));
             btnGitSync.Click += async (s, e) => await RunGitSyncAsync(cboBranch.Text.Trim());
@@ -1337,6 +1396,11 @@ namespace BuildServerKit
                 lblConnectedRepo.Text = "○ 연결된 저장소: 없음 (아래 버튼을 눌러 연결)";
                 lblConnectedRepo.ForeColor = Color.FromArgb(255, 205, 86);
                 this.Text = "Unreal Engine 전용 빌드 & GitHub Actions 자동 배포 매니저";
+                if (lblWorkflowStatus != null)
+                {
+                    lblWorkflowStatus.Text = "○ 브랜치 워크플로우(build.yml): 저장소 연결 후 자동 확인";
+                    lblWorkflowStatus.ForeColor = FgSub;
+                }
             }
         }
 
@@ -1358,17 +1422,318 @@ namespace BuildServerKit
                         var names = list.Where(b => b.ContainsKey("name") && b["name"] != null)
                                         .Select(b => b["name"].ToString())
                                         .ToArray();
-                        this.BeginInvoke(new Action(() =>
+                        this.BeginInvoke(new Action(async () =>
                         {
                             string cur = cboBranch.Text;
                             cboBranch.Items.Clear();
                             cboBranch.Items.AddRange(names);
-                            cboBranch.Text = !string.IsNullOrEmpty(cur) ? cur : names[0];
+                            cboBranch.Text = (!string.IsNullOrEmpty(cur) && names.Contains(cur)) ? cur : names[0];
                             AppendConsole("[GitHub API] 원격 브랜치 목록 자동 로드 완료: " + string.Join(", ", names), Color.Cyan);
+                            await ScanAllBranchesForWorkflowAsync(false);
                         }));
                     }
                 }
                 catch { }
+            });
+        }
+
+        private async void CheckSelectedBranchWorkflowAsync(string branch)
+        {
+            if (lblWorkflowStatus == null) return;
+            if (string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) || string.IsNullOrWhiteSpace(config.GitHubAccessToken) || string.IsNullOrWhiteSpace(branch))
+            {
+                lblWorkflowStatus.Text = "○ 브랜치 워크플로우(build.yml): 저장소/브랜치 선택 필요";
+                lblWorkflowStatus.ForeColor = FgSub;
+                return;
+            }
+
+            lblWorkflowStatus.Text = string.Format("● '{0}' 브랜치의 build.yml 확인 중...", branch);
+            lblWorkflowStatus.ForeColor = Color.FromArgb(255, 205, 86);
+
+            await Task.Run(() =>
+            {
+                var serializer = new JavaScriptSerializer();
+                List<string> foundYmls = new List<string>();
+                try
+                {
+                    string wfUrl = string.Format("https://api.github.com/repos/{0}/contents/.github/workflows?ref={1}",
+                        config.ConnectedRepoFullName, Uri.EscapeDataString(branch));
+                    string wfJson = GitHubApiGet(wfUrl, config.GitHubAccessToken);
+                    var items = serializer.Deserialize<List<Dictionary<string, object>>>(wfJson);
+                    if (items != null)
+                    {
+                        foreach (var item in items)
+                        {
+                            if (item.ContainsKey("name") && item["name"] != null)
+                            {
+                                string fn = item["name"].ToString();
+                                if (fn.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) || fn.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase))
+                                    foundYmls.Add(fn);
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                string runInfo = "";
+                if (foundYmls.Count > 0)
+                {
+                    try
+                    {
+                        string runUrl = string.Format("https://api.github.com/repos/{0}/actions/runs?branch={1}&per_page=1",
+                            config.ConnectedRepoFullName, Uri.EscapeDataString(branch));
+                        string runJson = GitHubApiGet(runUrl, config.GitHubAccessToken);
+                        var runDict = serializer.Deserialize<Dictionary<string, object>>(runJson);
+                        if (runDict != null && runDict.ContainsKey("workflow_runs"))
+                        {
+                            var runs = runDict["workflow_runs"] as System.Collections.ArrayList;
+                            if (runs != null && runs.Count > 0)
+                            {
+                                var r0 = runs[0] as Dictionary<string, object>;
+                                if (r0 != null)
+                                {
+                                    string st = r0.ContainsKey("status") && r0["status"] != null ? r0["status"].ToString() : "";
+                                    string conc = r0.ContainsKey("conclusion") && r0["conclusion"] != null ? r0["conclusion"].ToString() : "";
+                                    if (st == "queued") runInfo = " | 최근 Actions: 대기 중(Runner 가동 필요)";
+                                    else if (st == "in_progress") runInfo = " | 최근 Actions: 빌드 실행 중";
+                                    else if (st == "completed") runInfo = " | 최근 Actions: " + (conc == "success" ? "성공" : conc);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                this.BeginInvoke(new Action(() =>
+                {
+                    if (foundYmls.Count > 0)
+                    {
+                        lblWorkflowStatus.Text = string.Format("● [{0}] 워크플로우 감지됨: {1}{2}", branch, string.Join(", ", foundYmls), runInfo);
+                        lblWorkflowStatus.ForeColor = AccentGreen;
+                    }
+                    else
+                    {
+                        lblWorkflowStatus.Text = string.Format("✖ [{0}] 브랜치에 build.yml 없음 (아래 버튼으로 스캔/등록)", branch);
+                        lblWorkflowStatus.ForeColor = AccentOrange;
+                    }
+                }));
+            });
+        }
+
+        private async Task ScanAllBranchesForWorkflowAsync(bool showPopup)
+        {
+            if (string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) || string.IsNullOrWhiteSpace(config.GitHubAccessToken))
+            {
+                if (showPopup)
+                    MessageBox.Show("먼저 좌측 상단 [GitHub 로그인 & 사용할 저장소 선택하기]로 저장소를 연결해 주세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            AppendConsole("\n=== [GitHub API] 모든 원격 브랜치의 .github/workflows/build.yml 및 Actions 상태 스캔 중... ===", Color.Cyan);
+            var serializer = new JavaScriptSerializer();
+            List<string> branchesWithWf = new List<string>();
+            List<string> branchesWithoutWf = new List<string>();
+            StringBuilder report = new StringBuilder();
+
+            await Task.Run(() =>
+            {
+                try
+                {
+                    string brUrl = string.Format("https://api.github.com/repos/{0}/branches?per_page=100", config.ConnectedRepoFullName);
+                    string brJson = GitHubApiGet(brUrl, config.GitHubAccessToken);
+                    var brList = serializer.Deserialize<List<Dictionary<string, object>>>(brJson);
+                    if (brList != null)
+                    {
+                        foreach (var b in brList)
+                        {
+                            if (!b.ContainsKey("name") || b["name"] == null) continue;
+                            string bName = b["name"].ToString();
+                            List<string> ymls = new List<string>();
+                            try
+                            {
+                                string wfUrl = string.Format("https://api.github.com/repos/{0}/contents/.github/workflows?ref={1}",
+                                    config.ConnectedRepoFullName, Uri.EscapeDataString(bName));
+                                string wfJson = GitHubApiGet(wfUrl, config.GitHubAccessToken);
+                                var items = serializer.Deserialize<List<Dictionary<string, object>>>(wfJson);
+                                if (items != null)
+                                {
+                                    foreach (var item in items)
+                                    {
+                                        if (item.ContainsKey("name") && item["name"] != null)
+                                        {
+                                            string fn = item["name"].ToString();
+                                            if (fn.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) || fn.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase))
+                                                ymls.Add(fn);
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+
+                            if (ymls.Count > 0)
+                            {
+                                branchesWithWf.Add(bName);
+                                string line = string.Format("  ✔ [감지됨] '{0}' 브랜치 -> .github/workflows/{1}", bName, string.Join(", ", ymls));
+                                AppendConsole(line, AccentGreen);
+                                report.AppendLine(line);
+                            }
+                            else
+                            {
+                                branchesWithoutWf.Add(bName);
+                                string line = string.Format("  - [없음] '{0}' 브랜치 -> .github/workflows 폴더 없음", bName);
+                                AppendConsole(line, FgSub);
+                                report.AppendLine(line);
+                            }
+                        }
+                    }
+
+                    // Also check recent GitHub Actions workflow runs
+                    string runsUrl = string.Format("https://api.github.com/repos/{0}/actions/runs?per_page=5", config.ConnectedRepoFullName);
+                    string runsJson = GitHubApiGet(runsUrl, config.GitHubAccessToken);
+                    var runsDict = serializer.Deserialize<Dictionary<string, object>>(runsJson);
+                    if (runsDict != null && runsDict.ContainsKey("workflow_runs"))
+                    {
+                        var runs = runsDict["workflow_runs"] as System.Collections.ArrayList;
+                        if (runs != null && runs.Count > 0)
+                        {
+                            report.AppendLine("\n[최근 GitHub Actions 워크플로우 실행 기록]");
+                            AppendConsole("--- 최근 GitHub Actions 워크플로우 실행 감지 내역 ---", Color.Cyan);
+                            foreach (var rObj in runs)
+                            {
+                                var r = rObj as Dictionary<string, object>;
+                                if (r == null) continue;
+                                string hBranch = r.ContainsKey("head_branch") && r["head_branch"] != null ? r["head_branch"].ToString() : "";
+                                string status = r.ContainsKey("status") && r["status"] != null ? r["status"].ToString() : "";
+                                string conclusion = r.ContainsKey("conclusion") && r["conclusion"] != null ? r["conclusion"].ToString() : "진행/대기중";
+                                string title = r.ContainsKey("display_title") && r["display_title"] != null ? r["display_title"].ToString() : "";
+                                string rLine = string.Format("  • 브랜치 [{0}] | 상태: {1} ({2}) | 커밋: {3}", hBranch, status, conclusion, title);
+                                AppendConsole(rLine, status == "queued" ? Color.Yellow : FgText);
+                                report.AppendLine(rLine);
+                            }
+                        }
+                        else
+                        {
+                            report.AppendLine("\n[최근 GitHub Actions 실행 기록]: 아직 실행된 워크플로우 기록이 없습니다.");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendConsole("[스캔 오류] " + ex.Message, AccentRed);
+                }
+            });
+
+            if (branchesWithWf.Count > 0 && !branchesWithWf.Contains(cboBranch.Text.Trim()))
+            {
+                string targetBr = branchesWithWf[0];
+                cboBranch.Text = targetBr;
+                AppendConsole(string.Format("▶ build.yml이 존재하는 '{0}' 브랜치로 대상 브랜치를 자동 전환했습니다!", targetBr), AccentGreen);
+            }
+
+            CheckSelectedBranchWorkflowAsync(cboBranch.Text.Trim());
+
+            if (showPopup)
+            {
+                string summaryHeader = branchesWithWf.Count > 0
+                    ? string.Format("✔ 총 {0}개 브랜치에서 build.yml 워크플로우가 확인되었습니다: [{1}]\n\n", branchesWithWf.Count, string.Join(", ", branchesWithWf))
+                    : "✖ 아직 어떤 브랜치에서도 .github/workflows/build.yml 파일이 감지되지 않았습니다.\n([★ 선택한 브랜치에 build.yml 원클릭 자동 커밋] 버튼으로 즉시 추가할 수 있습니다.)\n\n";
+
+                MessageBox.Show(summaryHeader + report.ToString() +
+                    "\n[참고] 특정 브랜치에 build.yml을 커밋/Push했을 때 이 PC에서 자동으로 빌드가 돌게 하려면 좌측 [2. GitHub Actions Runner 원클릭 제어]에서 반드시 [▶ Runner 가동 시작]이 켜져 있어야 합니다!",
+                    "브랜치별 build.yml 및 GitHub Actions 감지 결과", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private async Task PushWorkflowToSelectedBranchAsync()
+        {
+            SaveConfigFromUI();
+            string branch = cboBranch.Text.Trim();
+            if (string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) || string.IsNullOrWhiteSpace(config.GitHubAccessToken))
+            {
+                MessageBox.Show("먼저 좌측 상단 [GitHub 로그인 & 사용할 저장소 선택하기]로 저장소를 연결해 주세요.", "저장소 연결 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(branch))
+            {
+                MessageBox.Show("대상 브랜치를 먼저 선택해 주세요.", "브랜치 선택 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string ymlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "github_workflow_build.yml");
+            if (!File.Exists(ymlPath))
+            {
+                MessageBox.Show("실행 폴더에서 github_workflow_build.yml 템플릿 파일을 찾을 수 없습니다.", "파일 없음", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                string.Format("선택한 '{0}' 브랜치에 '.github/workflows/build.yml' 파일을 자동으로 커밋(Push)하시겠습니까?\n\n" +
+                              "- 대상 저장소: {1}\n" +
+                              "- 대상 브랜치: {0}\n" +
+                              "- 생성 경로: .github/workflows/build.yml\n\n" +
+                              "(Push 즉시 GitHub Actions 워크플로우가 등록되며, Runner가 가동 중이면 자동 빌드가 시작됩니다.)",
+                              branch, config.ConnectedRepoFullName),
+                "선택 브랜치에 build.yml 원클릭 자동 등록",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (confirm != DialogResult.Yes) return;
+
+            byte[] rawYml = File.ReadAllBytes(ymlPath);
+            string cleanYml = EncodingHelper.DecodeSmartBytes(rawYml, rawYml.Length);
+            string base64Content = Convert.ToBase64String(Encoding.UTF8.GetBytes(cleanYml));
+
+            AppendConsole(string.Format("\n=== [GitHub API] '{0}' 브랜치에 .github/workflows/build.yml 자동 커밋(Push) 진행 중... ===", branch), Color.Cyan);
+
+            await Task.Run(() =>
+            {
+                try
+                {
+                    var serializer = new JavaScriptSerializer();
+                    string apiUrl = string.Format("https://api.github.com/repos/{0}/contents/.github/workflows/build.yml", config.ConnectedRepoFullName);
+
+                    // Check if file already exists on that branch to get its blob SHA
+                    string existingSha = null;
+                    try
+                    {
+                        string getJson = GitHubApiGet(apiUrl + "?ref=" + Uri.EscapeDataString(branch), config.GitHubAccessToken);
+                        var existingDict = serializer.Deserialize<Dictionary<string, object>>(getJson);
+                        if (existingDict != null && existingDict.ContainsKey("sha") && existingDict["sha"] != null)
+                            existingSha = existingDict["sha"].ToString();
+                    }
+                    catch { }
+
+                    var bodyObj = new Dictionary<string, object>
+                    {
+                        { "message", "ci: add Unreal Engine GitHub Actions build workflow (build.yml)" },
+                        { "content", base64Content },
+                        { "branch", branch }
+                    };
+                    if (!string.IsNullOrEmpty(existingSha))
+                        bodyObj["sha"] = existingSha;
+
+                    string putPayload = serializer.Serialize(bodyObj);
+                    GitHubApiPut(apiUrl, config.GitHubAccessToken, putPayload);
+
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        AppendConsole(string.Format("✔ ['{0}' 브랜치] .github/workflows/build.yml 자동 커밋 및 Push가 완료되었습니다!", branch), AccentGreen);
+                        CheckSelectedBranchWorkflowAsync(branch);
+                        MessageBox.Show(
+                            string.Format("'{0}' 브랜치에 .github/workflows/build.yml 등록이 완료되었습니다!\n\n" +
+                                          "이제 좌측 [▶ Runner 가동 시작] 버튼이 켜져 있으면 해당 브랜치의 빌드가 이 PC에서 자동으로 시작됩니다.", branch),
+                            "build.yml 원클릭 등록 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        AppendConsole("[build.yml 자동 등록 실패] " + ex.Message, AccentRed);
+                        MessageBox.Show("GitHub API로 build.yml 커밋 중 오류가 발생했습니다:\n" + ex.Message +
+                            "\n\n(토큰에 'workflow' 및 'repo' 권한이 포함되어 있는지 확인해 주세요.)", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }));
+                }
             });
         }
 
@@ -1677,6 +2042,17 @@ namespace BuildServerKit
             SetStatus("● GitHub Runner 등록 중...", AccentPurple);
             AppendConsole("=== 전용 PC를 GitHub 저장소(" + config.GitHubRepoUrl + ")의 Self-Hosted Runner로 등록합니다 ===", Color.Cyan);
 
+            // 기존에 다른 저장소나 이전 설정으로 .runner 파일이 남아있으면 재등록이 막히므로 정리
+            StopGitHubRunnerAgent();
+            foreach (var oldCfg in new[] { ".runner", ".credentials", ".credentials_rsaparams", ".service" })
+            {
+                string oldPath = Path.Combine(config.RunnerDir, oldCfg);
+                if (File.Exists(oldPath))
+                {
+                    try { File.Delete(oldPath); } catch { }
+                }
+            }
+
             string runnerName = Environment.MachineName + "-UE-Builder";
             string args = string.Format("--url \"{0}\" --token \"{1}\" --name \"{2}\" --work \"_work\" --unattended --replace",
                 config.GitHubRepoUrl, regToken, runnerName);
@@ -1688,6 +2064,9 @@ namespace BuildServerKit
 
             SetStatus("● 대기 중 (IDLE)", Color.FromArgb(52, 58, 64));
             UpdateRunnerStatusUI();
+
+            // Runner 등록 직후 저장소의 모든 브랜치를 스캔하여 어느 브랜치에 build.yml이 있는지 자동 확인
+            await ScanAllBranchesForWorkflowAsync(false);
         }
 
         private void StartGitHubRunnerAgent()
