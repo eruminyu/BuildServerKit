@@ -1,10 +1,11 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     전용 빌드 PC 초기 디렉토리 구조 및 스크립트 자동 배치 스크립트 (클린 배포용)
 #>
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $Dirs = @(
     "C:\actions-runner",
@@ -38,5 +39,5 @@ foreach ($File in @("Run-UEBuild.ps1", "Send-SlackReport.ps1", "github_workflow_
 
 Write-Host "`n=== [3/3] 초기 폴더 세팅 완료 ===" -ForegroundColor Cyan
 Write-Host "이제 UE_BuildManager.exe 를 실행하여:"
-Write-Host "  1. [🔗 GitHub 로그인 & 저장소 연결] 버튼으로 웹 브라우저에서 로그인 후 사용할 저장소를 선택하세요."
+Write-Host "  1. [GitHub 로그인 & 사용할 저장소 선택하기] 버튼으로 웹 브라우저에서 로그인 후 사용할 저장소를 선택하세요."
 Write-Host "  2. GitHub Actions Runner 설치/등록 및 Slack 알림 설정을 진행하세요." -ForegroundColor Green

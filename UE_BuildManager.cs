@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -16,12 +16,88 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyTitle("BuildServerKit - Unreal Engine Build & GitHub Actions Manager")]
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
-[assembly: AssemblyCopyright("Copyright © 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 namespace BuildServerKit
 {
+    public static class EncodingHelper
+    {
+        private static readonly UTF8Encoding Utf8Strict = new UTF8Encoding(false, true);
+        public static readonly UTF8Encoding Utf8WithBom = new UTF8Encoding(true);
+
+        /// <summary>
+        /// 바이트 배열이 유효한 UTF-8이면 UTF-8로 디코딩하고,
+        /// cmd.exe / cl.exe(MSVC) / PowerShell 등에서 출력된 CP949(ANSI) 바이트면 시스템 기본 인코딩(CP949)으로 자동 변환합니다.
+        /// </summary>
+        public static string DecodeSmartBytes(byte[] bytes, int count)
+        {
+            if (bytes == null || count <= 0) return "";
+            int offset = 0;
+            if (count >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                offset = 3;
+                count -= 3;
+            }
+            if (count <= 0) return "";
+
+            try
+            {
+                return Utf8Strict.GetString(bytes, offset, count);
+            }
+            catch
+            {
+                return Encoding.Default.GetString(bytes, offset, count);
+            }
+        }
+
+        /// <summary>
+        /// 프로세스의 StandardOutput / StandardError BaseStream에서 줄 단위로 바이트를 읽어
+        /// UTF-8과 CP949(EUC-KR)가 혼재된 출력도 글자 깨짐 없이 실시간으로 전달합니다.
+        /// </summary>
+        public static void ReadStreamLinesSmart(Stream stream, Action<string> onLine)
+        {
+            if (stream == null || onLine == null) return;
+            try
+            {
+                using (var ms = new MemoryStream())
+                {
+                    byte[] buf = new byte[4096];
+                    int read;
+                    while ((read = stream.Read(buf, 0, buf.Length)) > 0)
+                    {
+                        for (int i = 0; i < read; i++)
+                        {
+                            byte b = buf[i];
+                            if (b == (byte)'\n')
+                            {
+                                byte[] lineBytes = ms.ToArray();
+                                int len = lineBytes.Length;
+                                if (len > 0 && lineBytes[len - 1] == (byte)'\r') len--;
+                                string line = DecodeSmartBytes(lineBytes, len);
+                                ms.SetLength(0);
+                                onLine(line);
+                            }
+                            else
+                            {
+                                ms.WriteByte(b);
+                            }
+                        }
+                    }
+                    if (ms.Length > 0)
+                    {
+                        byte[] rem = ms.ToArray();
+                        int len = rem.Length;
+                        if (len > 0 && rem[len - 1] == (byte)'\r') len--;
+                        onLine(DecodeSmartBytes(rem, len));
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+
     public class AppConfig
     {
         public string UE5Root { get; set; }
@@ -114,7 +190,7 @@ namespace BuildServerKit
             if (!string.IsNullOrWhiteSpace(AccessToken))
             {
                 txtToken.Text = AccessToken;
-                 FetchUserAndReposAsync();
+                FetchUserAndReposAsync();
             }
         }
 
@@ -134,7 +210,7 @@ namespace BuildServerKit
 
             Label lblStep1 = new Label
             {
-                Text = "Step 1. GitHub 웹페이지에서 로그인 후 연동하기",
+                Text = "■ Step 1. GitHub 웹페이지에서 로그인 후 연동하기",
                 Font = new Font("Malgun Gothic", 10.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(130, 190, 255),
                 Location = new Point(18, y),
@@ -145,7 +221,7 @@ namespace BuildServerKit
 
             Label lblDesc1 = new Label
             {
-                Text = "아래 [🌐 GitHub 웹 로그인 & 토큰 발급 열기] 버튼을 누르면 브라우저에서 GitHub 로그인 후 권한(repo, workflow)이 자동 선택된 페이지가 열립니다.\n발급된 토큰(ghp_...)을 아래 칸에 붙여넣고 [🔍 로그인 및 내 저장소 불러오기]를 누르세요.",
+                Text = "아래 [1. GitHub 웹 로그인 & 토큰 발급 열기] 버튼을 누르면 브라우저에서 GitHub 로그인 후 권한(repo, workflow)이 자동 선택된 페이지가 열립니다.\n발급된 토큰(ghp_...)을 아래 칸에 붙여넣고 [2. 로그인 및 내 저장소 불러오기]를 누르세요.",
                 ForeColor = Color.FromArgb(170, 180, 195),
                 Font = new Font("Malgun Gothic", 8.8f),
                 Location = new Point(18, y),
@@ -154,13 +230,13 @@ namespace BuildServerKit
             this.Controls.Add(lblDesc1);
             y += 42;
 
-            Button btnOpenWebLogin = CreateBtn("🌐 1. GitHub 웹 로그인 & 연동 토큰 발급 페이지 열기", new Point(18, y), new Size(390, 34), AccentPurple);
+            Button btnOpenWebLogin = CreateBtn("▶ 1. GitHub 웹 로그인 & 연동 토큰 발급 페이지 열기", new Point(18, y), new Size(390, 34), AccentPurple);
             btnOpenWebLogin.Click += (s, e) =>
             {
                 Process.Start("https://github.com/settings/tokens/new?description=UE_Build_Deploy_Manager&scopes=repo,workflow,read:org");
             };
 
-            Button btnGhCliLogin = CreateBtn("⚡ GitHub CLI(gh)가 설치된 경우 브라우저 원클릭 로그인", new Point(418, y), new Size(370, 34), BgInput);
+            Button btnGhCliLogin = CreateBtn("★ GitHub CLI(gh)가 설치된 경우 브라우저 원클릭 로그인", new Point(418, y), new Size(370, 34), BgInput);
             btnGhCliLogin.Click += async (s, e) => await TryGhCliWebLoginAsync();
 
             this.Controls.Add(btnOpenWebLogin);
@@ -178,7 +254,7 @@ namespace BuildServerKit
                 UseSystemPasswordChar = true
             };
 
-            Button btnFetchRepos = CreateBtn("🔍 2. 로그인 및 내 저장소 불러오기", new Point(580, y - 2), new Size(208, 30), AccentBlue);
+            Button btnFetchRepos = CreateBtn("▶ 2. 로그인 및 내 저장소 불러오기", new Point(580, y - 2), new Size(208, 30), AccentBlue);
             btnFetchRepos.Click += (s, e) => FetchUserAndReposAsync();
 
             this.Controls.Add(lblTk);
@@ -188,7 +264,7 @@ namespace BuildServerKit
 
             lblAuthStatus = new Label
             {
-                Text = "⚪ 아직 로그인되지 않았습니다.",
+                Text = "○ 아직 로그인되지 않았습니다.",
                 Location = new Point(18, y),
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 205, 86),
@@ -200,7 +276,7 @@ namespace BuildServerKit
             // Step 2: Select Repository
             Label lblStep2 = new Label
             {
-                Text = "Step 2. 빌드매니저에서 사용할 저장소(Repository) 선택",
+                Text = "■ Step 2. 빌드매니저에서 사용할 저장소(Repository) 선택",
                 Font = new Font("Malgun Gothic", 10.5f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(130, 190, 255),
                 Location = new Point(18, y),
@@ -242,7 +318,7 @@ namespace BuildServerKit
             this.Controls.Add(lvRepos);
             y += 252;
 
-            btnSelectRepo = CreateBtn("✅ 선택한 저장소를 빌드매니저에 연결하기", new Point(18, y), new Size(580, 42), AccentGreen);
+            btnSelectRepo = CreateBtn("✔ 선택한 저장소를 빌드매니저에 연결하기", new Point(18, y), new Size(580, 42), AccentGreen);
             btnSelectRepo.Font = new Font("Malgun Gothic", 10.5f, FontStyle.Bold);
             btnSelectRepo.Enabled = false;
             btnSelectRepo.Click += (s, e) => ConfirmSelection();
@@ -274,7 +350,7 @@ namespace BuildServerKit
 
         private async Task TryGhCliWebLoginAsync()
         {
-            lblAuthStatus.Text = "⏳ GitHub CLI(gh) 웹 브라우저 로그인을 시도하는 중...";
+            lblAuthStatus.Text = "● GitHub CLI(gh) 웹 브라우저 로그인을 시도하는 중...";
             await Task.Run(() =>
             {
                 try
@@ -299,16 +375,21 @@ namespace BuildServerKit
                     {
                         if (pt != null)
                         {
-                            string tk = pt.StandardOutput.ReadToEnd().Trim();
-                            pt.WaitForExit(3000);
-                            if (!string.IsNullOrWhiteSpace(tk))
+                            using (var ms = new MemoryStream())
                             {
-                                this.BeginInvoke(new Action(() =>
+                                pt.StandardOutput.BaseStream.CopyTo(ms);
+                                pt.WaitForExit(3000);
+                                byte[] raw = ms.ToArray();
+                                string tk = EncodingHelper.DecodeSmartBytes(raw, raw.Length).Trim();
+                                if (!string.IsNullOrWhiteSpace(tk))
                                 {
-                                    txtToken.Text = tk;
-                                    FetchUserAndReposAsync();
-                                }));
-                                return;
+                                    this.BeginInvoke(new Action(() =>
+                                    {
+                                        txtToken.Text = tk;
+                                        FetchUserAndReposAsync();
+                                    }));
+                                    return;
+                                }
                             }
                         }
                     }
@@ -317,7 +398,7 @@ namespace BuildServerKit
                 {
                     this.BeginInvoke(new Action(() =>
                     {
-                        MessageBox.Show("이 PC에 GitHub CLI(gh)가 설치되어 있지 않습니다.\n좌측의 [🌐 1. GitHub 웹 로그인 & 연동 토큰 발급 페이지 열기] 버튼을 사용해 주세요!", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        MessageBox.Show("이 PC에 GitHub CLI(gh)가 설치되어 있지 않습니다.\n좌측의 [1. GitHub 웹 로그인 & 연동 토큰 발급 페이지 열기] 버튼을 사용해 주세요!", "안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }));
                 }
             });
@@ -332,7 +413,7 @@ namespace BuildServerKit
                 return;
             }
 
-            lblAuthStatus.Text = "⏳ GitHub 계정 인증 및 저장소 목록을 불러오는 중...";
+            lblAuthStatus.Text = "● GitHub 계정 인증 및 저장소 목록을 불러오는 중...";
             lblAuthStatus.ForeColor = Color.FromArgb(255, 205, 86);
             allRepos.Clear();
             lvRepos.Items.Clear();
@@ -375,7 +456,7 @@ namespace BuildServerKit
                         AuthenticatedUser = login;
                         AccessToken = tk;
                         allRepos = parsed;
-                        lblAuthStatus.Text = string.Format("🟢 로그인 성공: @{0} (접근 가능한 저장소 {1}개 불러옴)", login, allRepos.Count);
+                        lblAuthStatus.Text = string.Format("● 로그인 성공: @{0} (접근 가능한 저장소 {1}개 불러옴)", login, allRepos.Count);
                         lblAuthStatus.ForeColor = AccentGreen;
                         FilterRepoList();
                     }));
@@ -384,7 +465,7 @@ namespace BuildServerKit
                 {
                     this.BeginInvoke(new Action(() =>
                     {
-                        lblAuthStatus.Text = "🔴 인증 실패: 토큰이 유효하지 않거나 네트워크 오류입니다.";
+                        lblAuthStatus.Text = "✖ 인증 실패: 토큰이 유효하지 않거나 네트워크 오류입니다.";
                         lblAuthStatus.ForeColor = Color.FromArgb(255, 110, 110);
                         MessageBox.Show("GitHub API 호출 실패:\n" + ex.Message, "인증 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }));
@@ -402,7 +483,7 @@ namespace BuildServerKit
                 if (string.IsNullOrEmpty(q) || r.FullName.ToLowerInvariant().Contains(q))
                 {
                     var item = new ListViewItem(r.FullName);
-                    item.SubItems.Add(r.IsPrivate ? "🔒 Private" : "🌐 Public");
+                    item.SubItems.Add(r.IsPrivate ? "[Private]" : "[Public]");
                     item.SubItems.Add(r.DefaultBranch);
                     item.SubItems.Add(r.HtmlUrl);
                     item.Tag = r;
@@ -551,7 +632,8 @@ namespace BuildServerKit
             {
                 if (File.Exists(configPath))
                 {
-                    var json = File.ReadAllText(configPath, Encoding.UTF8);
+                    byte[] raw = File.ReadAllBytes(configPath);
+                    string json = EncodingHelper.DecodeSmartBytes(raw, raw.Length);
                     config = new JavaScriptSerializer().Deserialize<AppConfig>(json) ?? new AppConfig();
                 }
                 else
@@ -589,10 +671,10 @@ namespace BuildServerKit
             try
             {
                 var json = new JavaScriptSerializer().Serialize(config);
-                File.WriteAllText(configPath, json, Encoding.UTF8);
+                File.WriteAllText(configPath, json, EncodingHelper.Utf8WithBom);
                 if (Directory.Exists(@"C:\BuildSystem\Scripts"))
                 {
-                    File.WriteAllText(@"C:\BuildSystem\Scripts\build_manager_config.json", json, Encoding.UTF8);
+                    File.WriteAllText(@"C:\BuildSystem\Scripts\build_manager_config.json", json, EncodingHelper.Utf8WithBom);
                 }
             }
             catch (Exception ex)
@@ -605,11 +687,11 @@ namespace BuildServerKit
         {
             var res = MessageBox.Show(
                 "배포용 초기화를 진행하시겠습니까?\n\n" +
-                "• 연결된 GitHub 계정 및 저장소 정보\n" +
-                "• 저장된 모든 토큰 (GitHub / Runner / Slack)\n" +
-                "• 브랜치 목록 및 로컬 설정 파일(build_manager_config.json)\n\n" +
+                "- 연결된 GitHub 계정 및 저장소 정보\n" +
+                "- 저장된 모든 토큰 (GitHub / Runner / Slack)\n" +
+                "- 브랜치 목록 및 로컬 설정 파일(build_manager_config.json)\n\n" +
                 "위 항목들이 모두 삭제되어 처음 배포받았을 때의 깨끗한 초기 상태로 돌아갑니다.",
-                "🧹 배포용 데이터 전체 초기화",
+                "배포용 데이터 전체 초기화",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning);
 
@@ -649,7 +731,7 @@ namespace BuildServerKit
             CheckAssetLinksSilent();
             UpdateRunnerStatusUI();
 
-            AppendConsole("🧹 [초기화 완료] 모든 사용자 데이터와 설정이 초기화되어 깨끗한 배포 상태가 되었습니다.", AccentGreen);
+            AppendConsole("✔ [초기화 완료] 모든 사용자 데이터와 설정이 초기화되어 깨끗한 배포 상태가 되었습니다.", AccentGreen);
             MessageBox.Show("모든 설정과 잔여 데이터가 초기화되었습니다.\n이제 이 폴더 그대로 다른 PC나 팀원에게 배포하셔도 데이터가 남아있지 않습니다.", "초기화 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
@@ -685,14 +767,14 @@ namespace BuildServerKit
 
             lblCommitInfo = new Label
             {
-                Text = "연결된 저장소 없음 — 좌측 [🔗 GitHub 로그인 & 저장소 연결]을 눌러 시작하세요.",
+                Text = "연결된 저장소 없음 — 좌측 [0. GitHub 로그인 & 저장소 연결]을 눌러 시작하세요.",
                 AutoSize = true,
                 ForeColor = FgSub,
                 Font = new Font("Malgun Gothic", 9.5f, FontStyle.Regular),
                 Location = new Point(205, 18)
             };
 
-            btnHeaderReset = CreateFlatButton("🧹 배포용 데이터 초기화", new Point(1000, 12), new Size(175, 32), Color.FromArgb(55, 40, 45));
+            btnHeaderReset = CreateFlatButton("[초기화] 배포용 데이터 비우기", new Point(1000, 12), new Size(195, 32), Color.FromArgb(55, 40, 45));
             btnHeaderReset.Dock = DockStyle.Right;
             btnHeaderReset.Click += (s, e) => FactoryResetForDistribution();
 
@@ -701,7 +783,7 @@ namespace BuildServerKit
                 Text = "소요 시간: 00분 00초  ",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 205, 86),
-                Font = new Font("Consolas", 11f, FontStyle.Bold),
+                Font = new Font("Malgun Gothic", 10.5f, FontStyle.Bold),
                 Dock = DockStyle.Right,
                 Padding = new Padding(0, 8, 12, 0)
             };
@@ -724,12 +806,12 @@ namespace BuildServerKit
             int y = 8;
 
             // --- Section 0: GitHub Login & Repo Connection ---
-            Label sec0 = CreateSectionHeader("🔗 0. GitHub 로그인 & 저장소 연결", ref y);
+            Label sec0 = CreateSectionHeader("■ 0. GitHub 로그인 & 저장소 연결", ref y);
             pnlLeft.Controls.Add(sec0);
 
             lblConnectedRepo = new Label
             {
-                Text = "⚪ 연결된 저장소: 없음 (연결 필요)",
+                Text = "○ 연결된 저장소: 없음 (연결 필요)",
                 Location = new Point(14, y),
                 Size = new Size(346, 22),
                 ForeColor = Color.FromArgb(255, 205, 86),
@@ -738,14 +820,14 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(lblConnectedRepo);
             y += 24;
 
-            btnConnectGitHub = CreateFlatButton("🌐 GitHub 로그인 & 사용할 저장소 선택하기", new Point(14, y), new Size(346, 38), AccentPurple);
+            btnConnectGitHub = CreateFlatButton("▶ GitHub 로그인 & 사용할 저장소 선택하기", new Point(14, y), new Size(346, 38), AccentPurple);
             btnConnectGitHub.Font = new Font("Malgun Gothic", 9.5f, FontStyle.Bold);
             btnConnectGitHub.Click += (s, e) => OpenGitHubConnectDialog();
             pnlLeft.Controls.Add(btnConnectGitHub);
             y += 46;
 
             // --- Section 1: Build & Package ---
-            Label sec1 = CreateSectionHeader("🚀 1. 수동 빌드 & 패키징 원클릭 실행", ref y);
+            Label sec1 = CreateSectionHeader("■ 1. 수동 빌드 & 패키징 원클릭 실행", ref y);
             pnlLeft.Controls.Add(sec1);
 
             Label lblBr = new Label { Text = "대상 브랜치:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
@@ -759,7 +841,7 @@ namespace BuildServerKit
                 Text = config.LastBranch
             };
 
-            btnRefreshBranches = CreateFlatButton("🔄 목록", new Point(260, y - 1), new Size(100, 27), BgInput);
+            btnRefreshBranches = CreateFlatButton("↻ 목록 갱신", new Point(260, y - 1), new Size(100, 27), BgInput);
             btnRefreshBranches.Click += (s, e) => FetchBranchList();
 
             pnlLeft.Controls.Add(lblBr);
@@ -767,31 +849,31 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(btnRefreshBranches);
             y += 32;
 
-            btnGitSync = CreateFlatButton("⬇️ 선택한 브랜치 최신 커밋 가져오기 (Git Sync)", new Point(14, y), new Size(346, 31), Color.FromArgb(60, 68, 82));
+            btnGitSync = CreateFlatButton("▼ 선택한 브랜치 최신 커밋 가져오기 (Git Sync)", new Point(14, y), new Size(346, 31), Color.FromArgb(60, 68, 82));
             btnGitSync.Click += async (s, e) => await RunGitSyncAsync(cboBranch.Text.Trim());
             pnlLeft.Controls.Add(btnGitSync);
             y += 36;
 
-            btnQuickVerify = CreateFlatButton("⚡ 빠른 검증 빌드 (C++ 컴파일 + 증분 쿠킹)", new Point(14, y), new Size(346, 40), AccentGreen);
+            btnQuickVerify = CreateFlatButton("▶ 빠른 검증 빌드 (C++ 컴파일 + 증분 쿠킹)", new Point(14, y), new Size(346, 40), AccentGreen);
             btnQuickVerify.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
             btnQuickVerify.Click += (s, e) => StartUEBuild("QuickVerify", cboBranch.Text.Trim());
             pnlLeft.Controls.Add(btnQuickVerify);
             y += 45;
 
-            btnFullPackage = CreateFlatButton("📦 전체 패키징 빌드 (.pak 압축 + 아카이브)", new Point(14, y), new Size(346, 40), AccentBlue);
+            btnFullPackage = CreateFlatButton("★ 전체 패키징 빌드 (.pak 압축 + 아카이브)", new Point(14, y), new Size(346, 40), AccentBlue);
             btnFullPackage.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
             btnFullPackage.Click += (s, e) => StartUEBuild("FullPackage", cboBranch.Text.Trim());
             pnlLeft.Controls.Add(btnFullPackage);
             y += 45;
 
-            btnStopBuild = CreateFlatButton("🛑 진행 중인 빌드 강제 중단", new Point(14, y), new Size(346, 30), AccentRed);
+            btnStopBuild = CreateFlatButton("■ 진행 중인 빌드 강제 중단", new Point(14, y), new Size(346, 30), AccentRed);
             btnStopBuild.Enabled = false;
             btnStopBuild.Click += (s, e) => StopActiveBuild();
             pnlLeft.Controls.Add(btnStopBuild);
             y += 38;
 
             // --- Section 2: GitHub Actions Self-Hosted Runner Control ---
-            Label sec2 = CreateSectionHeader("🐙 2. GitHub Actions Runner 원클릭 제어", ref y);
+            Label sec2 = CreateSectionHeader("■ 2. GitHub Actions Runner 원클릭 제어", ref y);
             pnlLeft.Controls.Add(sec2);
 
             chkAutoSlack = new CheckBox
@@ -808,7 +890,7 @@ namespace BuildServerKit
 
             lblRunnerStatus = new Label
             {
-                Text = "Runner 상태: 확인 중...",
+                Text = "● Runner 상태: 확인 중...",
                 Location = new Point(14, y),
                 Size = new Size(346, 22),
                 ForeColor = Color.FromArgb(255, 205, 86),
@@ -817,21 +899,21 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(lblRunnerStatus);
             y += 24;
 
-            btnDownloadRunner = CreateFlatButton("⬇️ 1. GitHub Runner 자동 다운로드 & 설치", new Point(14, y), new Size(346, 31), BgInput);
+            btnDownloadRunner = CreateFlatButton("[1] GitHub Runner 자동 다운로드 & 설치", new Point(14, y), new Size(346, 31), BgInput);
             btnDownloadRunner.Click += async (s, e) => await DownloadAndExtractRunnerAsync();
             pnlLeft.Controls.Add(btnDownloadRunner);
             y += 35;
 
-            btnRegisterRunner = CreateFlatButton("🔗 2. 연결된 저장소에 이 PC를 Runner로 자동 등록", new Point(14, y), new Size(346, 31), AccentPurple);
+            btnRegisterRunner = CreateFlatButton("[2] 연결된 저장소에 이 PC를 Runner로 자동 등록", new Point(14, y), new Size(346, 31), AccentPurple);
             btnRegisterRunner.Click += async (s, e) => await RegisterGitHubRunnerAsync();
             pnlLeft.Controls.Add(btnRegisterRunner);
             y += 35;
 
-            btnStartRunner = CreateFlatButton("▶️ Runner 가동 시작", new Point(14, y), new Size(169, 34), AccentGreen);
+            btnStartRunner = CreateFlatButton("▶ Runner 가동 시작", new Point(14, y), new Size(169, 34), AccentGreen);
             btnStartRunner.Font = new Font("Malgun Gothic", 9.5f, FontStyle.Bold);
             btnStartRunner.Click += (s, e) => StartGitHubRunnerAgent();
 
-            btnStopRunner = CreateFlatButton("⏹️ Runner 중지", new Point(191, y), new Size(169, 34), AccentRed);
+            btnStopRunner = CreateFlatButton("■ Runner 중지", new Point(191, y), new Size(169, 34), AccentRed);
             btnStopRunner.Enabled = false;
             btnStopRunner.Click += (s, e) => StopGitHubRunnerAgent();
 
@@ -839,12 +921,12 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(btnStopRunner);
             y += 38;
 
-            btnOpenGHActionsWeb = CreateFlatButton("🌐 연결된 저장소의 GitHub Actions 웹 열기", new Point(14, y), new Size(346, 30), Color.FromArgb(50, 58, 72));
+            btnOpenGHActionsWeb = CreateFlatButton("→ 연결된 저장소의 GitHub Actions 웹 열기", new Point(14, y), new Size(346, 30), Color.FromArgb(50, 58, 72));
             btnOpenGHActionsWeb.Click += (s, e) =>
             {
                 if (string.IsNullOrWhiteSpace(config.GitHubRepoUrl))
                 {
-                    MessageBox.Show("먼저 [🌐 GitHub 로그인 & 사용할 저장소 선택하기]로 저장소를 연결해 주세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("먼저 [GitHub 로그인 & 사용할 저장소 선택하기]로 저장소를 연결해 주세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
                 Process.Start(config.GitHubRepoUrl + "/actions");
@@ -853,27 +935,27 @@ namespace BuildServerKit
             y += 38;
 
             // --- Section 3: One-Click Setup & Asset Links ---
-            Label sec3 = CreateSectionHeader("🛠️ 3. 전용 PC 초기 세팅 & 제외 에셋 연결", ref y);
+            Label sec3 = CreateSectionHeader("■ 3. 전용 PC 초기 세팅 & 제외 에셋 연결", ref y);
             pnlLeft.Controls.Add(sec3);
 
-            btnInitFolders = CreateFlatButton("1️⃣ 필수 폴더 구조(BuildSystem/Archive) 생성", new Point(14, y), new Size(346, 31), BgInput);
+            btnInitFolders = CreateFlatButton("[1] 필수 폴더 구조(BuildSystem/Archive) 생성", new Point(14, y), new Size(346, 31), BgInput);
             btnInitFolders.Click += (s, e) => InitDirectories();
             pnlLeft.Controls.Add(btnInitFolders);
             y += 35;
 
-            btnCloneRepo = CreateFlatButton("2️⃣ 연결된 저장소를 워크스페이스에 최초 Clone", new Point(14, y), new Size(346, 31), BgInput);
+            btnCloneRepo = CreateFlatButton("[2] 연결된 저장소를 워크스페이스에 최초 Clone", new Point(14, y), new Size(346, 31), BgInput);
             btnCloneRepo.Click += async (s, e) => await CloneRepositoryAsync();
             pnlLeft.Controls.Add(btnCloneRepo);
             y += 35;
 
-            btnLinkAssets = CreateFlatButton("3️⃣ .gitignore 제외 에셋 자동 스캔 & 심볼릭 링크 연결", new Point(14, y), new Size(346, 31), AccentOrange);
+            btnLinkAssets = CreateFlatButton("[3] .gitignore 제외 에셋 자동 스캔 & 심볼릭 링크 연결", new Point(14, y), new Size(346, 31), AccentOrange);
             btnLinkAssets.Click += (s, e) => EnsureAssetJunctions(true);
             pnlLeft.Controls.Add(btnLinkAssets);
             y += 34;
 
             lblAssetStatus = new Label
             {
-                Text = "에셋 링크 상태: 저장소 연결 후 확인 가능",
+                Text = "○ 에셋 링크 상태: 저장소 연결 후 확인 가능",
                 Location = new Point(14, y),
                 Size = new Size(346, 22),
                 ForeColor = FgSub,
@@ -882,15 +964,15 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(lblAssetStatus);
             y += 24;
 
-            Button btnOpenLogs = CreateFlatButton("📂 로그 보관함 열기", new Point(14, y), new Size(169, 30), BgInput);
+            Button btnOpenLogs = CreateFlatButton("로그 보관함 폴더 열기", new Point(14, y), new Size(169, 30), BgInput);
             btnOpenLogs.Click += (s, e) => OpenFolderSafe(Path.Combine(config.ArchiveRoot, "Logs"));
-            Button btnOpenPkgs = CreateFlatButton("📂 패키징 폴더 열기", new Point(191, y), new Size(169, 30), BgInput);
+            Button btnOpenPkgs = CreateFlatButton("패키징 결과물 폴더 열기", new Point(191, y), new Size(169, 30), BgInput);
             btnOpenPkgs.Click += (s, e) => OpenFolderSafe(Path.Combine(config.ArchiveRoot, "Packages"));
             pnlLeft.Controls.Add(btnOpenLogs);
             pnlLeft.Controls.Add(btnOpenPkgs);
             y += 34;
 
-            Button btnOpenShared = CreateFlatButton("📂 제외 에셋 원본(SharedAssets) 폴더 열기", new Point(14, y), new Size(346, 30), BgInput);
+            Button btnOpenShared = CreateFlatButton("제외 에셋 원본(SharedAssets) 폴더 열기", new Point(14, y), new Size(346, 30), BgInput);
             btnOpenShared.Click += (s, e) => OpenFolderSafe(config.SharedAssetsDir);
             pnlLeft.Controls.Add(btnOpenShared);
 
@@ -902,7 +984,7 @@ namespace BuildServerKit
             };
 
             // Tab 1: Live Console & Error Extractor
-            TabPage tabConsole = new TabPage("📟 실시간 빌드 로그 & 에러 분석")
+            TabPage tabConsole = new TabPage("[1] 실시간 빌드 로그 & 에러 분석")
             {
                 BackColor = BgDark,
                 Padding = new Padding(8)
@@ -916,13 +998,13 @@ namespace BuildServerKit
                 Padding = new Padding(6)
             };
 
-            Button btnExtractErrors = CreateFlatButton("🔍 현재 로그에서 에러(Error)만 추출", new Point(8, 5), new Size(235, 31), AccentOrange);
+            Button btnExtractErrors = CreateFlatButton("현재 로그에서 에러(Error)만 추출", new Point(8, 5), new Size(235, 31), AccentOrange);
             btnExtractErrors.Click += (s, e) => ExtractAndShowErrors();
 
-            Button btnManualSlack = CreateFlatButton("📤 현재 빌드 로그 Slack으로 즉시 전송", new Point(250, 5), new Size(250, 31), AccentBlue);
+            Button btnManualSlack = CreateFlatButton("현재 빌드 로그 Slack으로 즉시 전송", new Point(250, 5), new Size(250, 31), AccentBlue);
             btnManualSlack.Click += async (s, e) => await SendSlackReportManualAsync();
 
-            Button btnOpenCurrentLog = CreateFlatButton("📄 현재 로그 메모장으로 열기", new Point(507, 5), new Size(195, 31), BgInput);
+            Button btnOpenCurrentLog = CreateFlatButton("현재 로그 메모장으로 열기", new Point(507, 5), new Size(195, 31), BgInput);
             btnOpenCurrentLog.Click += (s, e) =>
             {
                 if (!string.IsNullOrEmpty(currentLogFilePath) && File.Exists(currentLogFilePath))
@@ -931,7 +1013,7 @@ namespace BuildServerKit
                     MessageBox.Show("아직 생성된 빌드 로그 파일이 없습니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
-            Button btnClearConsole = CreateFlatButton("🧹 화면 지우기", new Point(709, 5), new Size(115, 31), BgInput);
+            Button btnClearConsole = CreateFlatButton("화면 지우기", new Point(709, 5), new Size(115, 31), BgInput);
             btnClearConsole.Click += (s, e) =>
             {
                 rtbConsole.Clear();
@@ -954,7 +1036,7 @@ namespace BuildServerKit
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(16, 18, 22),
                 ForeColor = Color.FromArgb(220, 225, 232),
-                Font = new Font("Consolas", 9.5f),
+                Font = new Font("Malgun Gothic", 9.5f),
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
                 WordWrap = false
@@ -968,7 +1050,7 @@ namespace BuildServerKit
             };
             Label lblErrTitle = new Label
             {
-                Text = " 🚨 핵심 에러 / 경고 발췌 뷰어 (컴파일 에러, 쿠킹 에러, Ensure 자동 필터링)",
+                Text = " [!] 핵심 에러 / 경고 발췌 뷰어 (C++ 컴파일 에러, 쿠킹 에러, Ensure 자동 필터링)",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 150, 150),
                 Font = new Font("Malgun Gothic", 9f, FontStyle.Bold),
@@ -981,7 +1063,7 @@ namespace BuildServerKit
                 Dock = DockStyle.Fill,
                 BackColor = Color.FromArgb(24, 16, 18),
                 ForeColor = Color.FromArgb(255, 180, 180),
-                Font = new Font("Consolas", 9.5f),
+                Font = new Font("Malgun Gothic", 9.5f),
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
                 WordWrap = false
@@ -995,23 +1077,23 @@ namespace BuildServerKit
             tabConsole.Controls.Add(pnlConsoleToolbar);
 
             // Tab 2: Build Log History
-            TabPage tabHistory = new TabPage("🗂️ 저장된 빌드 로그 히스토리")
+            TabPage tabHistory = new TabPage("[2] 저장된 빌드 로그 히스토리")
             {
                 BackColor = BgDark,
                 Padding = new Padding(8)
             };
 
             Panel pnlHistTop = new Panel { Dock = DockStyle.Top, Height = 42, BackColor = BgPanel };
-            Button btnRefreshHist = CreateFlatButton("🔄 히스토리 새로고침", new Point(8, 5), new Size(160, 31), BgInput);
+            Button btnRefreshHist = CreateFlatButton("↻ 히스토리 새로고침", new Point(8, 5), new Size(160, 31), BgInput);
             btnRefreshHist.Click += (s, e) => RefreshHistoryList();
 
-            Button btnViewHistLog = CreateFlatButton("📄 선택한 빌드의 전체 로그 열기", new Point(176, 5), new Size(220, 31), AccentBlue);
+            Button btnViewHistLog = CreateFlatButton("선택한 빌드의 전체 로그 열기", new Point(176, 5), new Size(220, 31), AccentBlue);
             btnViewHistLog.Click += (s, e) => OpenSelectedHistoryLog(false);
 
-            Button btnViewHistErr = CreateFlatButton("🚨 선택한 빌드의 에러 요약 열기", new Point(404, 5), new Size(220, 31), AccentOrange);
+            Button btnViewHistErr = CreateFlatButton("선택한 빌드의 에러 요약 열기", new Point(404, 5), new Size(220, 31), AccentOrange);
             btnViewHistErr.Click += (s, e) => OpenSelectedHistoryLog(true);
 
-            Button btnOpenHistDir = CreateFlatButton("📂 해당 로그 폴더 열기", new Point(632, 5), new Size(175, 31), BgInput);
+            Button btnOpenHistDir = CreateFlatButton("해당 로그 폴더 열기", new Point(632, 5), new Size(175, 31), BgInput);
             btnOpenHistDir.Click += (s, e) =>
             {
                 if (lvHistory.SelectedItems.Count > 0)
@@ -1041,7 +1123,7 @@ namespace BuildServerKit
             tabHistory.Controls.Add(pnlHistTop);
 
             // Tab 3: Settings & GitHub Actions / Slack Config
-            TabPage tabSettings = new TabPage("⚙️ 경로 & GitHub Actions / Slack 설정")
+            TabPage tabSettings = new TabPage("[3] 경로 & GitHub Actions / Slack 설정")
             {
                 BackColor = BgDark,
                 Padding = new Padding(16),
@@ -1069,9 +1151,9 @@ namespace BuildServerKit
             };
 
             AppendConsole("=== Unreal Engine 전용 빌드 & GitHub Actions 자동 배포 매니저 ===", Color.Cyan);
-            AppendConsole("1. 좌측 상단 [🌐 GitHub 로그인 & 사용할 저장소 선택하기] 버튼을 눌러 계정을 연동하고 대상 저장소를 선택하세요.", FgSub);
-            AppendConsole("2. [🐙 2. GitHub Actions Runner 원클릭 제어]에서 Runner 다운로드 및 자동 등록을 클릭 한 번으로 진행할 수 있습니다.", FgSub);
-            AppendConsole("3. 다른 PC로 이 프로그램을 배포하기 전에는 우측 상단 [🧹 배포용 데이터 초기화] 버튼을 눌러 잔여 데이터를 모두 비울 수 있습니다.\n", FgSub);
+            AppendConsole("1. 좌측 상단 [GitHub 로그인 & 사용할 저장소 선택하기] 버튼을 눌러 계정을 연동하고 대상 저장소를 선택하세요.", FgSub);
+            AppendConsole("2. [2. GitHub Actions Runner 원클릭 제어]에서 Runner 다운로드 및 자동 등록을 클릭 한 번으로 진행할 수 있습니다.", FgSub);
+            AppendConsole("3. 다른 PC로 이 프로그램을 배포하기 전에는 우측 상단 [초기화] 버튼을 눌러 잔여 데이터를 모두 비울 수 있습니다.\n", FgSub);
         }
 
         private void BuildSettingsTab(TabPage page)
@@ -1079,7 +1161,7 @@ namespace BuildServerKit
             int sy = 14;
             Label lblHeader1 = new Label
             {
-                Text = "📁 전용 빌드 PC 경로 설정",
+                Text = "■ 전용 빌드 PC 경로 설정",
                 Font = new Font("Malgun Gothic", 11f, FontStyle.Bold),
                 ForeColor = Color.White,
                 Location = new Point(16, sy),
@@ -1099,7 +1181,7 @@ namespace BuildServerKit
 
             Label lblHeaderGH = new Label
             {
-                Text = "🐙 GitHub Actions Self-Hosted Runner & 워크플로우 설정",
+                Text = "■ GitHub Actions Self-Hosted Runner & 워크플로우 설정",
                 Font = new Font("Malgun Gothic", 11f, FontStyle.Bold),
                 ForeColor = Color.White,
                 Location = new Point(16, sy),
@@ -1112,7 +1194,7 @@ namespace BuildServerKit
 
             Label lblRunnerHint = new Label
             {
-                Text = "💡 [🌐 GitHub 로그인 & 저장소 선택]으로 로그인한 경우, 위 토큰을 비워두어도 API로 Runner 등록 토큰을 자동 발급받아 등록합니다!",
+                Text = "* [GitHub 로그인 & 저장소 선택]으로 로그인한 경우, 위 토큰을 비워두어도 API로 Runner 등록 토큰을 자동 발급받아 등록합니다!",
                 ForeColor = Color.FromArgb(130, 210, 160),
                 Font = new Font("Malgun Gothic", 8.8f),
                 Location = new Point(210, sy - 6),
@@ -1121,7 +1203,7 @@ namespace BuildServerKit
             page.Controls.Add(lblRunnerHint);
             sy += 24;
 
-            Button btnOpenRunnerSettings = CreateFlatButton("🌐 GitHub 웹에서 Runner 토큰 수동 발급 페이지 열기", new Point(210, sy), new Size(340, 33), BgInput);
+            Button btnOpenRunnerSettings = CreateFlatButton("→ GitHub 웹에서 Runner 토큰 수동 발급 페이지 열기", new Point(210, sy), new Size(340, 33), BgInput);
             btnOpenRunnerSettings.Click += (s, e) =>
             {
                 SaveConfigFromUI();
@@ -1133,13 +1215,14 @@ namespace BuildServerKit
                 Process.Start(config.GitHubRepoUrl + "/settings/actions/runners/new?arch=x64&os=win");
             };
 
-            Button btnCopyWorkflowYml = CreateFlatButton("📋 .github/workflows/build.yml 코드 클립보드 복사", new Point(558, sy), new Size(340, 33), AccentPurple);
+            Button btnCopyWorkflowYml = CreateFlatButton("★ .github/workflows/build.yml 코드 클립보드 복사", new Point(558, sy), new Size(340, 33), AccentPurple);
             btnCopyWorkflowYml.Click += (s, e) =>
             {
                 string ymlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "github_workflow_build.yml");
                 if (File.Exists(ymlPath))
                 {
-                    Clipboard.SetText(File.ReadAllText(ymlPath, Encoding.UTF8));
+                    byte[] raw = File.ReadAllBytes(ymlPath);
+                    Clipboard.SetText(EncodingHelper.DecodeSmartBytes(raw, raw.Length));
                     MessageBox.Show("github_workflow_build.yml 내용이 클립보드에 복사되었습니다!\n연결된 저장소의 .github/workflows/build.yml 파일로 추가하시면 됩니다.", "복사 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
@@ -1154,7 +1237,7 @@ namespace BuildServerKit
 
             Label lblHeader2 = new Label
             {
-                Text = "💬 Slack 에러 로그 자동 전송 & Tailscale 설정",
+                Text = "■ Slack 에러 로그 자동 전송 & Tailscale 설정",
                 Font = new Font("Malgun Gothic", 11f, FontStyle.Bold),
                 ForeColor = Color.White,
                 Location = new Point(16, sy),
@@ -1167,17 +1250,17 @@ namespace BuildServerKit
             txtSlackChannel = AddTextSettingRow(page, "Slack 채널 ID (예: C01234...):", config.SlackChannelId, ref sy);
             txtTailscaleIP = AddTextSettingRow(page, "전용 PC Tailscale IP:", config.TailscaleIP, ref sy);
 
-            Button btnDetectTailscale = CreateFlatButton("🔍 이 PC의 Tailscale IP(100.x.y.z) 자동 감지", new Point(210, sy), new Size(310, 34), BgInput);
+            Button btnDetectTailscale = CreateFlatButton("이 PC의 Tailscale IP(100.x.y.z) 자동 감지", new Point(210, sy), new Size(310, 34), BgInput);
             btnDetectTailscale.Click += (s, e) => DetectTailscaleIP();
 
-            Button btnTestSlack = CreateFlatButton("🔔 Slack 연동 테스트 메시지 보내기", new Point(530, sy), new Size(260, 34), AccentBlue);
+            Button btnTestSlack = CreateFlatButton("Slack 연동 테스트 메시지 보내기", new Point(530, sy), new Size(260, 34), AccentBlue);
             btnTestSlack.Click += async (s, e) => await TestSlackConnectionAsync();
 
             page.Controls.Add(btnDetectTailscale);
             page.Controls.Add(btnTestSlack);
             sy += 46;
 
-            Button btnSaveCfg = CreateFlatButton("💾 모든 설정 저장", new Point(210, sy), new Size(240, 40), AccentGreen);
+            Button btnSaveCfg = CreateFlatButton("✔ 모든 설정 저장", new Point(210, sy), new Size(240, 40), AccentGreen);
             btnSaveCfg.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
             btnSaveCfg.Click += (s, e) =>
             {
@@ -1189,7 +1272,7 @@ namespace BuildServerKit
                 MessageBox.Show("설정이 성공적으로 저장되었습니다.", "저장 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
 
-            Button btnFactoryReset = CreateFlatButton("🧹 배포용 전체 설정 & 데이터 초기화 (Factory Reset)", new Point(460, sy), new Size(330, 40), AccentRed);
+            Button btnFactoryReset = CreateFlatButton("[초기화] 배포용 전체 설정 & 데이터 초기화 (Factory Reset)", new Point(460, sy), new Size(350, 40), AccentRed);
             btnFactoryReset.Click += (s, e) => FactoryResetForDistribution();
 
             page.Controls.Add(btnSaveCfg);
@@ -1226,8 +1309,8 @@ namespace BuildServerKit
                     UpdateCommitBanner();
                     CheckAssetLinksSilent();
 
-                    AppendConsole(string.Format("🔗 [저장소 연결 완료] @{0} 계정의 '{1}' 저장소가 연결되었습니다!", config.GitHubUser, repo.FullName), AccentGreen);
-                    AppendConsole("• 워크스페이스 경로: " + config.ProjectDir, FgSub);
+                    AppendConsole(string.Format("✔ [저장소 연결 완료] @{0} 계정의 '{1}' 저장소가 연결되었습니다!", config.GitHubUser, repo.FullName), AccentGreen);
+                    AppendConsole("  - 워크스페이스 경로: " + config.ProjectDir, FgSub);
 
                     // Fetch remote branches via GitHub API immediately even before cloning
                     FetchBranchesViaGitHubApiAsync();
@@ -1239,19 +1322,19 @@ namespace BuildServerKit
         {
             if (!string.IsNullOrWhiteSpace(config.ConnectedRepoFullName))
             {
-                lblConnectedRepo.Text = string.Format("🟢 연결됨: {0} (@{1})", config.ConnectedRepoFullName,
+                lblConnectedRepo.Text = string.Format("● 연결됨: {0} (@{1})", config.ConnectedRepoFullName,
                     string.IsNullOrWhiteSpace(config.GitHubUser) ? "GitHub" : config.GitHubUser);
                 lblConnectedRepo.ForeColor = AccentGreen;
                 this.Text = string.Format("[{0}] - UE 전용 빌드 & GitHub Actions 매니저", config.ConnectedRepoFullName);
             }
             else if (!string.IsNullOrWhiteSpace(config.GitRemoteUrl))
             {
-                lblConnectedRepo.Text = "🟢 연결됨: " + config.GitRemoteUrl;
+                lblConnectedRepo.Text = "● 연결됨: " + config.GitRemoteUrl;
                 lblConnectedRepo.ForeColor = AccentGreen;
             }
             else
             {
-                lblConnectedRepo.Text = "⚪ 연결된 저장소: 없음 (아래 버튼을 눌러 연결)";
+                lblConnectedRepo.Text = "○ 연결된 저장소: 없음 (아래 버튼을 눌러 연결)";
                 lblConnectedRepo.ForeColor = Color.FromArgb(255, 205, 86);
                 this.Text = "Unreal Engine 전용 빌드 & GitHub Actions 자동 배포 매니저";
             }
@@ -1425,9 +1508,9 @@ namespace BuildServerKit
                 if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(Path.Combine(config.ProjectDir, ".git")))
                 {
                     if (!string.IsNullOrWhiteSpace(config.ConnectedRepoFullName))
-                        lblCommitInfo.Text = string.Format("연결된 저장소: [{0}] — [2️⃣ 연결된 저장소를 워크스페이스에 최초 Clone]을 눌러 클론하세요.", config.ConnectedRepoFullName);
+                        lblCommitInfo.Text = string.Format("연결된 저장소: [{0}] — [[2] 연결된 저장소를 워크스페이스에 최초 Clone]을 눌러 클론하세요.", config.ConnectedRepoFullName);
                     else
-                        lblCommitInfo.Text = "연결된 저장소 없음 — 좌측 [🌐 GitHub 로그인 & 사용할 저장소 선택하기]를 눌러 시작하세요.";
+                        lblCommitInfo.Text = "연결된 저장소 없음 — 좌측 [GitHub 로그인 & 사용할 저장소 선택하기]를 눌러 시작하세요.";
                     return;
                 }
                 string branch = RunGitQuick("rev-parse --abbrev-ref HEAD");
@@ -1447,20 +1530,22 @@ namespace BuildServerKit
             if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(config.ProjectDir))
                 return "";
 
-            var psi = new ProcessStartInfo("git", args)
+            string fullArgs = "-c core.quotepath=false -c i18n.logOutputEncoding=utf-8 " + args;
+            var psi = new ProcessStartInfo("git", fullArgs)
             {
                 WorkingDirectory = config.ProjectDir,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8
+                CreateNoWindow = true
             };
             using (var p = Process.Start(psi))
+            using (var ms = new MemoryStream())
             {
-                string output = p.StandardOutput.ReadToEnd().Trim();
+                p.StandardOutput.BaseStream.CopyTo(ms);
                 p.WaitForExit(4000);
-                return output;
+                byte[] raw = ms.ToArray();
+                return EncodingHelper.DecodeSmartBytes(raw, raw.Length).Trim();
             }
         }
 
@@ -1477,28 +1562,28 @@ namespace BuildServerKit
 
             if (isRunning)
             {
-                lblRunnerStatus.Text = "🟢 Runner 상태: 작동 중 (GitHub 커밋 대기/수신 중)";
+                lblRunnerStatus.Text = "● Runner 상태: 작동 중 (GitHub 커밋 대기/수신 중)";
                 lblRunnerStatus.ForeColor = AccentGreen;
                 btnStartRunner.Enabled = false;
                 btnStopRunner.Enabled = true;
             }
             else if (File.Exists(runnerCfg))
             {
-                lblRunnerStatus.Text = "🟡 Runner 상태: 등록 완료 (대기/중지 상태)";
+                lblRunnerStatus.Text = "● Runner 상태: 등록 완료 (대기/중지 상태)";
                 lblRunnerStatus.ForeColor = Color.FromArgb(255, 205, 86);
                 btnStartRunner.Enabled = true;
                 btnStopRunner.Enabled = false;
             }
             else if (File.Exists(configCmd))
             {
-                lblRunnerStatus.Text = "🟠 Runner 상태: 다운로드됨 ([2. Runner 자동 등록] 필요)";
+                lblRunnerStatus.Text = "● Runner 상태: 다운로드됨 ([2. Runner 자동 등록] 필요)";
                 lblRunnerStatus.ForeColor = AccentOrange;
                 btnStartRunner.Enabled = false;
                 btnStopRunner.Enabled = false;
             }
             else
             {
-                lblRunnerStatus.Text = "⚪ Runner 상태: 미설치 ([1. 자동 다운로드 & 설치] 클릭)";
+                lblRunnerStatus.Text = "○ Runner 상태: 미설치 ([1. 자동 다운로드 & 설치] 클릭)";
                 lblRunnerStatus.ForeColor = FgSub;
                 btnStartRunner.Enabled = false;
                 btnStopRunner.Enabled = false;
@@ -1518,12 +1603,13 @@ namespace BuildServerKit
                 return;
             }
 
-            SetStatus("⬇️ GitHub Runner 다운로드 중...", AccentBlue);
+            SetStatus("▼ GitHub Runner 다운로드 중...", AccentBlue);
             AppendConsole("=== GitHub Actions Runner (Windows x64) 최신 릴리스 다운로드 시작 ===", Color.Cyan);
 
             await Task.Run(() =>
             {
                 string psCmd = string.Format(
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; " +
                     "$ProgressPreference = 'SilentlyContinue'; " +
                     "$rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/actions/runner/releases/latest' -Headers @{{ 'User-Agent'='UE-BuildManager' }}; " +
                     "$asset = $rel.assets | Where-Object {{ $_.name -like 'actions-runner-win-x64-*.zip' }} | Select-Object -First 1; " +
@@ -1549,12 +1635,12 @@ namespace BuildServerKit
             string configCmd = Path.Combine(config.RunnerDir, "config.cmd");
             if (!File.Exists(configCmd))
             {
-                MessageBox.Show("먼저 [⬇️ 1. GitHub Runner 자동 다운로드 & 설치] 버튼을 눌러 설치해 주세요.", "설치 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("먼저 [[1] GitHub Runner 자동 다운로드 & 설치] 버튼을 눌러 설치해 주세요.", "설치 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             if (string.IsNullOrWhiteSpace(config.GitHubRepoUrl))
             {
-                MessageBox.Show("먼저 좌측 상단 [🌐 GitHub 로그인 & 사용할 저장소 선택하기] 버튼으로 저장소를 연결해 주세요!", "저장소 연결 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("먼저 좌측 상단 [GitHub 로그인 & 사용할 저장소 선택하기] 버튼으로 저장소를 연결해 주세요!", "저장소 연결 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -1583,12 +1669,12 @@ namespace BuildServerKit
 
             if (string.IsNullOrWhiteSpace(regToken))
             {
-                MessageBox.Show("Runner 등록 토큰을 가져올 수 없습니다.\n[🌐 GitHub 로그인 & 사용할 저장소 선택하기]로 다시 로그인하거나, [⚙️ 설정] 탭에서 Runner 등록 토큰을 입력해 주세요.", "토큰 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("Runner 등록 토큰을 가져올 수 없습니다.\n[GitHub 로그인 & 사용할 저장소 선택하기]로 다시 로그인하거나, [[3] 설정] 탭에서 Runner 등록 토큰을 입력해 주세요.", "토큰 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 tabMain.SelectedIndex = 2;
                 return;
             }
 
-            SetStatus("🔗 GitHub Runner 등록 중...", AccentPurple);
+            SetStatus("● GitHub Runner 등록 중...", AccentPurple);
             AppendConsole("=== 전용 PC를 GitHub 저장소(" + config.GitHubRepoUrl + ")의 Self-Hosted Runner로 등록합니다 ===", Color.Cyan);
 
             string runnerName = Environment.MachineName + "-UE-Builder";
@@ -1622,18 +1708,15 @@ namespace BuildServerKit
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardErrorEncoding = Encoding.UTF8
+                    CreateNoWindow = true
                 };
                 runnerProcess = new Process { StartInfo = psi };
-                runnerProcess.OutputDataReceived += (s, e) => { if (e.Data != null) AppendConsole("[GitHub Runner] " + e.Data, Color.Cyan); };
-                runnerProcess.ErrorDataReceived += (s, e) => { if (e.Data != null) AppendConsole("[GitHub Runner] " + e.Data, AccentOrange); };
                 runnerProcess.Start();
-                runnerProcess.BeginOutputReadLine();
-                runnerProcess.BeginErrorReadLine();
 
-                AppendConsole("▶️ GitHub Actions Self-Hosted Runner가 백그라운드에서 가동을 시작했습니다!", AccentGreen);
+                Task.Run(() => EncodingHelper.ReadStreamLinesSmart(runnerProcess.StandardOutput.BaseStream, line => AppendConsole("[GitHub Runner] " + line, Color.Cyan)));
+                Task.Run(() => EncodingHelper.ReadStreamLinesSmart(runnerProcess.StandardError.BaseStream, line => AppendConsole("[GitHub Runner] " + line, AccentOrange)));
+
+                AppendConsole("▶ GitHub Actions Self-Hosted Runner가 백그라운드에서 가동을 시작했습니다!", AccentGreen);
                 UpdateRunnerStatusUI();
             }
             catch (Exception ex)
@@ -1661,7 +1744,7 @@ namespace BuildServerKit
                 {
                     p.Kill();
                 }
-                AppendConsole("⏹️ GitHub Actions Runner 가동이 중지되었습니다.", AccentOrange);
+                AppendConsole("■ GitHub Actions Runner 가동이 중지되었습니다.", AccentOrange);
             }
             catch { }
             UpdateRunnerStatusUI();
@@ -1698,11 +1781,15 @@ namespace BuildServerKit
                 {
                     string src = Path.Combine(exeDir, sFile);
                     if (File.Exists(src))
-                        File.Copy(src, Path.Combine(@"C:\BuildSystem\Scripts", sFile), true);
+                    {
+                        byte[] raw = File.ReadAllBytes(src);
+                        string text = EncodingHelper.DecodeSmartBytes(raw, raw.Length);
+                        File.WriteAllText(Path.Combine(@"C:\BuildSystem\Scripts", sFile), text, EncodingHelper.Utf8WithBom);
+                    }
                 }
 
                 AppendConsole("[초기 세팅] 필수 폴더 구조 및 스크립트 배치가 완료되었습니다.", AccentGreen);
-                MessageBox.Show("필수 폴더 생성 및 스크립트 배치가 완료되었습니다!\n\n• GitHub Runner 폴더: " + config.RunnerDir + "\n• 워크스페이스 폴더: " + config.WorkspaceRoot + "\n• 로그/패키지 보관함: " + config.ArchiveRoot + "\n• 제외 에셋 원본 폴더: " + config.SharedAssetsDir, "완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("필수 폴더 생성 및 스크립트 배치가 완료되었습니다!\n\n- GitHub Runner 폴더: " + config.RunnerDir + "\n- 워크스페이스 폴더: " + config.WorkspaceRoot + "\n- 로그/패키지 보관함: " + config.ArchiveRoot + "\n- 제외 에셋 원본 폴더: " + config.SharedAssetsDir, "완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
@@ -1715,7 +1802,7 @@ namespace BuildServerKit
             SaveConfigFromUI();
             if (string.IsNullOrWhiteSpace(config.GitRemoteUrl))
             {
-                MessageBox.Show("먼저 좌측 상단 [🌐 GitHub 로그인 & 사용할 저장소 선택하기] 버튼을 눌러 저장소를 연결해 주세요!", "저장소 선택 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("먼저 좌측 상단 [GitHub 로그인 & 사용할 저장소 선택하기] 버튼을 눌러 저장소를 연결해 주세요!", "저장소 선택 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -1735,13 +1822,13 @@ namespace BuildServerKit
             string parentDir = Path.GetDirectoryName(config.ProjectDir);
             if (!Directory.Exists(parentDir)) Directory.CreateDirectory(parentDir);
 
-            SetStatus("⬇️ Git Clone 진행 중...", AccentBlue);
+            SetStatus("▼ Git Clone 진행 중...", AccentBlue);
             AppendConsole("=== 연결된 저장소 최초 Clone 시작: " + config.GitRemoteUrl + " ===", Color.Cyan);
 
             string cloneUrl = GetAuthenticatedCloneUrl();
             await Task.Run(() =>
             {
-                RunProcessStream("git", string.Format("clone \"{0}\" \"{1}\"", cloneUrl, config.ProjectDir), parentDir);
+                RunProcessStream("git", string.Format("-c core.quotepath=false clone \"{0}\" \"{1}\"", cloneUrl, config.ProjectDir), parentDir);
             });
 
             SetStatus("● 대기 중 (IDLE)", Color.FromArgb(52, 58, 64));
@@ -1759,7 +1846,9 @@ namespace BuildServerKit
 
             try
             {
-                var lines = File.ReadAllLines(gitIgnore, Encoding.UTF8);
+                byte[] raw = File.ReadAllBytes(gitIgnore);
+                string content = EncodingHelper.DecodeSmartBytes(raw, raw.Length);
+                var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var line in lines)
                 {
                     string trimmed = line.Trim();
@@ -1782,7 +1871,7 @@ namespace BuildServerKit
         {
             if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(config.ProjectDir))
             {
-                lblAssetStatus.Text = "⚪ 에셋 링크 상태: 저장소 Clone 후 자동 감지됨";
+                lblAssetStatus.Text = "○ 에셋 링크 상태: 저장소 Clone 후 자동 감지됨";
                 lblAssetStatus.ForeColor = FgSub;
                 return;
             }
@@ -1790,7 +1879,7 @@ namespace BuildServerKit
             var map = DiscoverIgnoredContentFolders();
             if (map.Count == 0)
             {
-                lblAssetStatus.Text = "🟢 .gitignore에 제외된 별도 Content 에셋 폴더 없음";
+                lblAssetStatus.Text = "● .gitignore에 제외된 별도 Content 에셋 폴더 없음";
                 lblAssetStatus.ForeColor = AccentGreen;
                 return;
             }
@@ -1798,12 +1887,12 @@ namespace BuildServerKit
             int linkedCount = map.Keys.Count(k => Directory.Exists(k));
             if (linkedCount == map.Count)
             {
-                lblAssetStatus.Text = string.Format("🟢 .gitignore 제외 에셋 {0}개 폴더 모두 연결됨", map.Count);
+                lblAssetStatus.Text = string.Format("● .gitignore 제외 에셋 {0}개 폴더 모두 연결됨", map.Count);
                 lblAssetStatus.ForeColor = AccentGreen;
             }
             else
             {
-                lblAssetStatus.Text = string.Format("🔴 제외 에셋 {0}개 중 {1}개 미연결 ([3️⃣ 심볼릭 링크 연결] 클릭)", map.Count, map.Count - linkedCount);
+                lblAssetStatus.Text = string.Format("✖ 제외 에셋 {0}개 중 {1}개 미연결 ([[3] 심볼릭 링크 연결] 클릭)", map.Count, map.Count - linkedCount);
                 lblAssetStatus.ForeColor = Color.FromArgb(255, 120, 120);
             }
         }
@@ -1901,18 +1990,18 @@ namespace BuildServerKit
             SaveConfigFromUI();
             if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(Path.Combine(config.ProjectDir, ".git")))
             {
-                MessageBox.Show("워크스페이스에 Git 저장소가 없습니다. 먼저 [2️⃣ 최초 Clone]을 실행해 주세요.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("워크스페이스에 Git 저장소가 없습니다. 먼저 [[2] 최초 Clone]을 실행해 주세요.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            SetStatus("⬇️ Git 동기화 중...", AccentBlue);
+            SetStatus("▼ Git 동기화 중...", AccentBlue);
             AppendConsole(string.Format("\n=== [Git Sync] '{0}' 브랜치 최신 커밋으로 동기화 시작 ===", branch), Color.Cyan);
 
             await Task.Run(() =>
             {
-                RunProcessStream("git", "fetch --all --prune", config.ProjectDir);
-                RunProcessStream("git", "checkout -f " + branch, config.ProjectDir);
-                RunProcessStream("git", "reset --hard origin/" + branch, config.ProjectDir);
+                RunProcessStream("git", "-c core.quotepath=false fetch --all --prune", config.ProjectDir);
+                RunProcessStream("git", "-c core.quotepath=false checkout -f " + branch, config.ProjectDir);
+                RunProcessStream("git", "-c core.quotepath=false reset --hard origin/" + branch, config.ProjectDir);
             });
 
             EnsureAssetJunctions(false);
@@ -1945,13 +2034,13 @@ namespace BuildServerKit
 
             if (!File.Exists(runUat))
             {
-                MessageBox.Show("RunUAT.bat 파일을 찾을 수 없습니다:\n" + runUat + "\n\n[⚙️ 설정] 탭에서 Unreal Engine 설치 경로를 확인해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("RunUAT.bat 파일을 찾을 수 없습니다:\n" + runUat + "\n\n[[3] 설정] 탭에서 Unreal Engine 설치 경로를 확인해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 tabMain.SelectedIndex = 2;
                 return;
             }
             if (string.IsNullOrEmpty(uproject) || !File.Exists(uproject))
             {
-                MessageBox.Show("워크스페이스 경로에서 *.uproject 파일을 찾을 수 없습니다:\n" + config.ProjectDir + "\n\n먼저 저장소를 연결하고 [2️⃣ 최초 Clone]을 실행해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("워크스페이스 경로에서 *.uproject 파일을 찾을 수 없습니다:\n" + config.ProjectDir + "\n\n먼저 저장소를 연결하고 [[2] 최초 Clone]을 실행해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -1984,12 +2073,12 @@ namespace BuildServerKit
             string uatArgs;
             if (mode == "QuickVerify")
             {
-                SetStatus("⚡ 빠른 검증 빌드 진행 중...", AccentGreen);
+                SetStatus("▶ 빠른 검증 빌드 진행 중...", AccentGreen);
                 uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig=Development -build -cook -iterate -skipstage -utf8output", uproject);
             }
             else
             {
-                SetStatus("📦 전체 패키징 빌드 진행 중...", AccentBlue);
+                SetStatus("★ 전체 패키징 빌드 진행 중...", AccentBlue);
                 string pkgOutDir = Path.Combine(config.ArchiveRoot, "Packages", buildId);
                 Directory.CreateDirectory(pkgOutDir);
                 uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig=Development -build -cook -allmaps -stage -pak -archive -archivedirectory=\"{1}\" -utf8output", uproject, pkgOutDir);
@@ -2019,13 +2108,13 @@ namespace BuildServerKit
 
             if (exitCode == 0)
             {
-                SetStatus("✅ 빌드 성공 (" + durationStr + ")", AccentGreen);
-                AppendConsole(string.Format("\n🎉 === 빌드/패키징이 성공적으로 완료되었습니다! (소요 시간: {0}) ===", durationStr), AccentGreen);
+                SetStatus("✔ 빌드 성공 (" + durationStr + ")", AccentGreen);
+                AppendConsole(string.Format("\n✔ === 빌드/패키징이 성공적으로 완료되었습니다! (소요 시간: {0}) ===", durationStr), AccentGreen);
             }
             else
             {
-                SetStatus("❌ 빌드 실패 (ExitCode: " + exitCode + ")", AccentRed);
-                AppendConsole(string.Format("\n🚨 === 빌드/패키징 중 에러가 발생했습니다! (ExitCode: {0}, 소요 시간: {1}) ===", exitCode, durationStr), AccentRed);
+                SetStatus("✖ 빌드 실패 (ExitCode: " + exitCode + ")", AccentRed);
+                AppendConsole(string.Format("\n[!] === 빌드/패키징 중 에러가 발생했습니다! (ExitCode: {0}, 소요 시간: {1}) ===", exitCode, durationStr), AccentRed);
                 AppendConsole("하단 [핵심 에러 / 경고 발췌 뷰어]에서 정확한 실패 원인을 바로 확인하세요.", Color.Yellow);
             }
 
@@ -2040,7 +2129,7 @@ namespace BuildServerKit
         {
             try
             {
-                using (var writer = new StreamWriter(logFile, false, Encoding.UTF8))
+                using (var writer = new StreamWriter(logFile, false, EncodingHelper.Utf8WithBom))
                 {
                     var psi = new ProcessStartInfo("cmd.exe", string.Format("/c \"\"{0}\" {1}\"", exePath, args))
                     {
@@ -2048,32 +2137,31 @@ namespace BuildServerKit
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
-                        CreateNoWindow = true,
-                        StandardOutputEncoding = Encoding.UTF8,
-                        StandardErrorEncoding = Encoding.UTF8
+                        CreateNoWindow = true
                     };
 
                     activeProcess = new Process { StartInfo = psi };
-                    activeProcess.OutputDataReceived += (s, e) =>
-                    {
-                        if (e.Data != null)
-                        {
-                            lock (writer) { writer.WriteLine(e.Data); writer.Flush(); }
-                            AppendConsole(e.Data);
-                        }
-                    };
-                    activeProcess.ErrorDataReceived += (s, e) =>
-                    {
-                        if (e.Data != null)
-                        {
-                            lock (writer) { writer.WriteLine(e.Data); writer.Flush(); }
-                            AppendConsole(e.Data, Color.FromArgb(255, 110, 110));
-                        }
-                    };
-
                     activeProcess.Start();
-                    activeProcess.BeginOutputReadLine();
-                    activeProcess.BeginErrorReadLine();
+
+                    var tOut = Task.Run(() =>
+                    {
+                        EncodingHelper.ReadStreamLinesSmart(activeProcess.StandardOutput.BaseStream, line =>
+                        {
+                            lock (writer) { writer.WriteLine(line); writer.Flush(); }
+                            AppendConsole(line);
+                        });
+                    });
+
+                    var tErr = Task.Run(() =>
+                    {
+                        EncodingHelper.ReadStreamLinesSmart(activeProcess.StandardError.BaseStream, line =>
+                        {
+                            lock (writer) { writer.WriteLine(line); writer.Flush(); }
+                            AppendConsole(line, Color.FromArgb(255, 110, 110));
+                        });
+                    });
+
+                    Task.WaitAll(tOut, tErr);
                     activeProcess.WaitForExit();
                     return activeProcess.ExitCode;
                 }
@@ -2103,7 +2191,7 @@ namespace BuildServerKit
                     {
                         if (killProc != null) killProc.WaitForExit(3000);
                     }
-                    AppendConsole("\n🛑 사용자에 의해 빌드가 강제 중단되었습니다.", AccentOrange);
+                    AppendConsole("\n■ 사용자에 의해 빌드가 강제 중단되었습니다.", AccentOrange);
                 }
                 catch (Exception ex)
                 {
@@ -2147,7 +2235,9 @@ namespace BuildServerKit
 
             try
             {
-                var lines = File.ReadAllLines(logFile, Encoding.UTF8);
+                byte[] raw = File.ReadAllBytes(logFile);
+                string content = EncodingHelper.DecodeSmartBytes(raw, raw.Length);
+                var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
                 var regex = new Regex(@"error C\d+:|\bfatal error\b|Error:|Ensure condition failed|AutomationTool exiting with ExitCode", RegexOptions.IgnoreCase);
                 for (int i = 0; i < lines.Length; i++)
                 {
@@ -2158,7 +2248,7 @@ namespace BuildServerKit
                 }
                 if (matched.Count > 0 && !string.IsNullOrEmpty(summaryOutFile))
                 {
-                    File.WriteAllLines(summaryOutFile, matched, Encoding.UTF8);
+                    File.WriteAllLines(summaryOutFile, matched, EncodingHelper.Utf8WithBom);
                 }
             }
             catch { }
@@ -2191,7 +2281,7 @@ namespace BuildServerKit
             SaveConfigFromUI();
             if (string.IsNullOrWhiteSpace(config.SlackBotToken) || string.IsNullOrWhiteSpace(config.SlackChannelId))
             {
-                MessageBox.Show("[⚙️ 설정] 탭에서 Slack Bot Token과 채널 ID를 먼저 입력해 주세요.", "설정 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show("[[3] 설정] 탭에서 Slack Bot Token과 채널 ID를 먼저 입력해 주세요.", "설정 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 tabMain.SelectedIndex = 2;
                 return;
             }
@@ -2217,13 +2307,13 @@ namespace BuildServerKit
             {
                 try
                 {
-                    string modeLabel = (mode == "QuickVerify") ? "⚡ 빠른 컴파일·쿠킹 검증" : "📦 전체 패키징 빌드";
+                    string modeLabel = (mode == "QuickVerify") ? "빠른 컴파일·쿠킹 검증" : "전체 패키징 빌드";
                     string tsIp = string.IsNullOrWhiteSpace(config.TailscaleIP) ? "전용PC_IP" : config.TailscaleIP;
                     string sharedPath = archiveDir.Replace(@"C:\BuildArchive", @"\\" + tsIp + @"\BuildArchive");
 
                     if (exitCode == 0)
                     {
-                        string okMsg = string.Format("✅ *[{0} 성공]* {1} 완료\n• *브랜치/커밋:* `{2}` (`{3}`) by *{4}*\n• *커밋 메시지:* {5}\n• *소요 시간:* {6}\n• *공유 폴더:* `{7}`",
+                        string okMsg = string.Format("*[{0} 빌드 성공]* ({1} 완료)\n• *브랜치/커밋:* `{2}` (`{3}`) by *{4}*\n• *커밋 메시지:* {5}\n• *소요 시간:* {6}\n• *공유 폴더:* `{7}`",
                             projectName, modeLabel, branch, hash, author, msg, duration, sharedPath);
                         PostSlackChatMessage(okMsg);
                         AppendConsole("[Slack] 성공 알림 전송 완료!", AccentGreen);
@@ -2238,7 +2328,7 @@ namespace BuildServerKit
                     if (snippet.Length > 2500) snippet = snippet.Substring(snippet.Length - 2500);
 
                     string failMsg = string.Format(
-                        "🚨 *[{0} 빌드/패키징 실패]* ({1})\n• *브랜치 / 커밋:* `{2}` (`{3}`)\n• *작성자:* *{4}*\n• *커밋 메시지:* {5}\n• *소요 시간:* {6}\n• *전체 로그 공유폴더:* `{7}`\n\n*🔍 [에러 발생 당시 핵심 로그 발췌]*\n```\n{8}\n```",
+                        "*[{0} 빌드/패키징 실패]* ({1})\n• *브랜치 / 커밋:* `{2}` (`{3}`)\n• *작성자:* *{4}*\n• *커밋 메시지:* {5}\n• *소요 시간:* {6}\n• *전체 로그 공유폴더:* `{7}`\n\n*[에러 발생 당시 핵심 로그 발췌]*\n```\n{8}\n```",
                         projectName, modeLabel, branch, hash, author, msg, duration, sharedPath, snippet);
 
                     PostSlackChatMessage(failMsg);
@@ -2302,7 +2392,7 @@ namespace BuildServerKit
             {
                 files = new[] { new { id = fileId, title = "원본 빌드/패키징 로그 (" + uploadFileName + ")" } },
                 channel_id = config.SlackChannelId,
-                initial_comment = "📎 *작업 PC에서 바로 열람 가능한 에러 발생 당시 원본 .log 파일입니다.*"
+                initial_comment = "*작업 PC에서 바로 열람 가능한 에러 발생 당시 원본 .log 파일입니다.*"
             });
             byte[] body3 = Encoding.UTF8.GetBytes(completePayload);
 
@@ -2326,7 +2416,7 @@ namespace BuildServerKit
             {
                 await Task.Run(() =>
                 {
-                    PostSlackChatMessage("🔔 *[UE 빌드 매니저]* 전용 빌드 PC(GitHub Actions Runner)와 Slack 채널 연동 테스트가 성공했습니다!");
+                    PostSlackChatMessage("*[UE 빌드 매니저]* 전용 빌드 PC(GitHub Actions Runner)와 Slack 채널 연동 테스트가 성공했습니다!");
                 });
                 MessageBox.Show("Slack 채널로 테스트 메시지가 전송되었습니다! Slack 앱을 확인해 보세요.", "연동 성공", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -2349,12 +2439,12 @@ namespace BuildServerKit
             var dirs = new DirectoryInfo(logsRoot).GetDirectories().OrderByDescending(d => d.CreationTime);
             foreach (var d in dirs)
             {
-                string mode = d.Name.Contains("FullPackage") ? "📦 전체 패키징" : "⚡ 빠른 검증";
+                string mode = d.Name.Contains("FullPackage") ? "[전체 패키징]" : "[빠른 검증]";
                 bool hasErr = File.Exists(Path.Combine(d.FullName, "Error_Summary.log"));
                 var item = new ListViewItem(d.Name);
                 item.SubItems.Add(mode);
                 item.SubItems.Add(d.CreationTime.ToString("yyyy-MM-dd HH:mm:ss"));
-                item.SubItems.Add(hasErr ? "🚨 에러 있음" : "✅ 정상");
+                item.SubItems.Add(hasErr ? "[!] 에러 있음" : "✔ 정상");
                 item.SubItems.Add(d.FullName);
                 item.Tag = d.FullName;
                 if (hasErr) item.ForeColor = Color.FromArgb(255, 130, 130);
@@ -2413,16 +2503,13 @@ namespace BuildServerKit
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardErrorEncoding = Encoding.UTF8
+                    CreateNoWindow = true
                 };
                 using (var p = Process.Start(psi))
                 {
-                    p.OutputDataReceived += (s, e) => { if (e.Data != null) AppendConsole(e.Data); };
-                    p.ErrorDataReceived += (s, e) => { if (e.Data != null) AppendConsole(e.Data); };
-                    p.BeginOutputReadLine();
-                    p.BeginErrorReadLine();
+                    var tOut = Task.Run(() => EncodingHelper.ReadStreamLinesSmart(p.StandardOutput.BaseStream, line => AppendConsole(line)));
+                    var tErr = Task.Run(() => EncodingHelper.ReadStreamLinesSmart(p.StandardError.BaseStream, line => AppendConsole(line)));
+                    Task.WaitAll(tOut, tErr);
                     p.WaitForExit();
                 }
             }

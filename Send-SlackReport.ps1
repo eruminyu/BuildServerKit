@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ProjectName = "UEProject",
     [int]$ExitCode,
     [string]$BuildMode,
@@ -12,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $SlackBotToken  = $env:SLACK_BOT_TOKEN
 $SlackChannelId = $env:SLACK_CHANNEL_ID
@@ -36,14 +37,14 @@ if ([string]::IsNullOrWhiteSpace($SlackBotToken) -or [string]::IsNullOrWhiteSpac
     exit 0
 }
 
-$ModeLabel = if ($BuildMode -eq "QuickVerify") { "⚡ 빠른 컴파일·쿠킹 검증" } else { "📦 전체 패키징 빌드" }
+$ModeLabel = if ($BuildMode -eq "QuickVerify") { "빠른 컴파일·쿠킹 검증" } else { "전체 패키징 빌드" }
 $SharedLogPath = $LogArchiveDir -replace '^[A-Za-z]:\\BuildArchive', "\\$TailscaleIP\BuildArchive"
 
 # ==============================================================================
 # 1. 성공 시 알림 전송
 # ==============================================================================
 if ($ExitCode -eq 0) {
-    $SuccessText = "✅ *[$ProjectName 성공]* $ModeLabel 완료`n• *브랜치/커밋:* `$BranchName` (`$CommitHash`) by *$CommitAuthor*`n• *커밋 메시지:* $CommitMsg`n• *소요 시간:* $Duration`n• *로그/결과물 공유폴더:* `$SharedLogPath`"
+    $SuccessText = "*[$ProjectName 빌드 성공]* ($ModeLabel 완료)`n- *브랜치/커밋:* ``$BranchName`` (``$CommitHash``) by *$CommitAuthor*`n- *커밋 메시지:* $CommitMsg`n- *소요 시간:* $Duration`n- *로그/결과물 공유폴더:* ``$SharedLogPath``"
     $Body = @{ channel = $SlackChannelId; text = $SuccessText } | ConvertTo-Json -Compress
     Invoke-RestMethod -Uri "https://slack.com/api/chat.postMessage" -Method Post `
         -Headers @{ Authorization = "Bearer $SlackBotToken"; "Content-Type" = "application/json; charset=utf-8" } `
@@ -67,18 +68,18 @@ if ($ErrorSnippet.Length -gt 2500) {
     $ErrorSnippet = $ErrorSnippet.Substring($ErrorSnippet.Length - 2500)
 }
 if ([string]::IsNullOrWhiteSpace($ErrorSnippet) -and (Test-Path $UATLogFile)) {
-    $ErrorSnippet = (Get-Content $UATLogFile -Tail 30) -join "`n"
+    $ErrorSnippet = (Get-Content $UATLogFile -Tail 30 -Encoding UTF8) -join "`n"
 }
 
 $FailMessage = @"
-🚨 *[$ProjectName 빌드/패키징 실패]* ($ModeLabel)
-• *브랜치 / 커밋:* `$BranchName` (`$CommitHash`)
-• *작성자:* *$CommitAuthor*
-• *커밋 메시지:* $CommitMsg
-• *소요 시간:* $Duration (ExitCode: $ExitCode)
-• *전체 로그 공유폴더:* `$SharedLogPath`
+*[$ProjectName 빌드/패키징 실패]* ($ModeLabel)
+- *브랜치 / 커밋:* ``$BranchName`` (``$CommitHash``)
+- *작성자:* *$CommitAuthor*
+- *커밋 메시지:* $CommitMsg
+- *소요 시간:* $Duration (ExitCode: $ExitCode)
+- *전체 로그 공유폴더:* ``$SharedLogPath``
 
-*🔍 [에러 발생 당시 핵심 로그 발췌]*
+*[에러 발생 당시 핵심 로그 발췌]*
 ``````
 $ErrorSnippet
 ``````
@@ -104,7 +105,7 @@ if (Test-Path $UATLogFile) {
         $CompleteBody = @{
             files           = @(@{ id = $UploadUrlResp.file_id; title = "원본 전체 빌드 로그 ($FileName)" })
             channel_id      = $SlackChannelId
-            initial_comment = "📎 *작업 PC에서 바로 열람 가능한 에러 발생 당시 전체 원본 로그 파일입니다.*"
+            initial_comment = "*작업 PC에서 바로 열람 가능한 에러 발생 당시 전체 원본 로그 파일입니다.*"
         } | ConvertTo-Json -Depth 4 -Compress
 
         Invoke-RestMethod -Uri "https://slack.com/api/files.completeUploadExternal" -Method Post `

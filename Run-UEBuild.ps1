@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("QuickVerify", "FullPackage")]
     [string]$BuildMode = "QuickVerify",
     [string]$BranchName = "main",
@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+$OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ==============================================================================
@@ -57,9 +58,9 @@ Set-Location $ProjectDir
 # ==============================================================================
 # 2. 현재 커밋 메타데이터 수집
 # ==============================================================================
-$CommitHash    = (git rev-parse --short HEAD).Trim()
-$CommitAuthor  = (git log -1 --pretty=format:"%an").Trim()
-$CommitMsg     = (git log -1 --pretty=format:"%s").Trim()
+$CommitHash    = (git -c core.quotepath=false rev-parse --short HEAD).Trim()
+$CommitAuthor  = (git -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 log -1 --pretty=format:"%an").Trim()
+$CommitMsg     = (git -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 log -1 --pretty=format:"%s").Trim()
 $TimeStamp     = Get-Date -Format "yyyy-MM-dd_HHmmss"
 $SafeBranch    = ($BranchName -replace '^origin/', '') -replace '[\\/:*?"<>|]', '_'
 
@@ -156,7 +157,11 @@ if ($BuildMode -eq "QuickVerify") {
 # 6. RunUAT 실행 및 모든 실시간 콘솔 로그를 파일로 동시 저장
 # ==============================================================================
 $StartTime = Get-Date
-& $RunUAT @UATArgs 2>&1 | Tee-Object -FilePath $UATLogFile
+"" | Out-File -FilePath $UATLogFile -Encoding utf8 -NoNewline
+& $RunUAT @UATArgs 2>&1 | ForEach-Object {
+    Write-Host $_
+    $_ | Out-File -FilePath $UATLogFile -Encoding utf8 -Append
+}
 $ExitCode = $LASTEXITCODE
 $Elapsed = (Get-Date) - $StartTime
 $Duration = "{0:D2}분 {1:D2}초" -f [int]$Elapsed.TotalMinutes, $Elapsed.Seconds
