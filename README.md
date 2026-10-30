@@ -101,9 +101,9 @@ flowchart LR
    * Step 1에서 로그인한 GitHub 계정 권한을 사용하여 **Runner 등록 토큰을 API로 자동 발급**받고, 전용 PC를 연결된 저장소의 Self-Hosted Runner로 즉시 등록합니다. (별도로 웹에서 등록 토큰을 복사해 올 필요가 없습니다.)
 3. **`[▶ Runner 가동 시작]`** 클릭
    * 상태가 **`● Runner 상태: 작동 중 (GitHub 커밋 대기/수신 중)`**으로 바뀌며 백그라운드에서 커밋 감지를 시작합니다.
-4. **저장소에 워크플로우 파일(`.github/workflows/build.yml`) 추가**
-   * 우측 **`[[3] 경로 & GitHub Actions / Slack 설정]`** 탭에서 **`[★ .github/workflows/build.yml 코드 클립보드 복사]`** 버튼을 누릅니다.
-   * 연결된 GitHub 저장소에 `.github/workflows/build.yml` 파일을 만들고 붙여넣어 커밋하면 모든 자동화 연동이 완료됩니다.
+4. **저장소의 원하는 브랜치에 워크플로우 파일(`.github/workflows/build.yml`) 원클릭 등록 & 스캔**
+   * **원클릭 자동 등록:** 좌측 `대상 브랜치:`에서 원하는 브랜치를 선택하고 **`[★ 선택한 브랜치에 build.yml 원클릭 자동 커밋(Push)]`** 버튼을 누르면, 수동으로 파일을 복사할 필요 없이 프로그램이 GitHub API로 해당 브랜치에 `.github/workflows/build.yml`을 즉시 커밋·Push합니다.
+   * **특정 브랜치 `build.yml` 감지 확인:** 이미 특정 작업 브랜치에 직접 `build.yml`을 커밋해 두셨다면 **`[▶ 모든 브랜치 build.yml 유무 & Actions 감지 스캔]`** 버튼을 클릭하세요. 저장소 내 모든 원격 브랜치를 스캔하여 어느 브랜치에 `build.yml`이 있는지 찾아내고 해당 브랜치로 자동 전환하며, 최근 GitHub Actions 대기(`queued`)/실행 상태를 실시간으로 표시합니다.
    * **자동 분기 동작 방식:**
      * 일반 작업 브랜치에 Push 할 때 ➔ **빠른 검증 빌드(`QuickVerify` : C++ 컴파일 + 증분 쿠킹 검사)** 자동 실행
      * `main` 브랜치에 병합(Push)하거나 GitHub 웹의 `Actions` 탭에서 수동 실행(`Run workflow`)할 때 ➔ **전체 패키징 빌드(`FullPackage` : 전체 쿠킹 + `.pak` 압축 + 아카이브 추출)** 실행
