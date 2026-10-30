@@ -17,8 +17,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 namespace BuildServerKit
 {
@@ -531,6 +531,7 @@ namespace BuildServerKit
 
         // GitHub Actions Self-Hosted Runner Controls
         private Label lblRunnerStatus;
+        private Button btnToggleApiPoller;
         private Button btnDownloadRunner;
         private Button btnRegisterRunner;
         private Button btnStartRunner;
@@ -538,6 +539,10 @@ namespace BuildServerKit
         private Button btnOpenGHActionsWeb;
         private CheckBox chkAutoSlack;
         private Process runnerProcess;
+        private Timer apiPollTimer;
+        private bool isApiPolling = false;
+        private bool isPollChecking = false;
+        private HashSet<string> processedRunOrCommitIds = new HashSet<string>();
 
         // Setup & Assets
         private Button btnInitFolders;
@@ -560,6 +565,7 @@ namespace BuildServerKit
         private TextBox txtArchiveRoot;
         private TextBox txtRunnerDir;
         private TextBox txtGitUrl;
+        private TextBox txtGitHubApiToken;
         private TextBox txtRunnerToken;
         private TextBox txtSlackToken;
         private TextBox txtSlackChannel;
@@ -698,6 +704,18 @@ namespace BuildServerKit
                 config.GitHubRepoUrl = config.GitRemoteUrl.EndsWith(".git")
                     ? config.GitRemoteUrl.Substring(0, config.GitRemoteUrl.Length - 4)
                     : config.GitRemoteUrl;
+
+                // GitRemoteUrl에서 owner/repo 자동 추출 (예: 500pebbles/ProjectSW)
+                if (!string.IsNullOrWhiteSpace(config.GitHubRepoUrl))
+                {
+                    var mRepo = Regex.Match(config.GitHubRepoUrl, @"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", RegexOptions.IgnoreCase);
+                    if (mRepo.Success)
+                        config.ConnectedRepoFullName = mRepo.Groups[1].Value;
+                }
+
+                if (txtGitHubApiToken != null)
+                    config.GitHubAccessToken = txtGitHubApiToken.Text.Trim();
+
                 config.RunnerToken = txtRunnerToken.Text.Trim();
                 config.SlackBotToken = txtSlackToken.Text.Trim();
                 config.SlackChannelId = txtSlackChannel.Text.Trim();
@@ -751,10 +769,13 @@ namespace BuildServerKit
             txtArchiveRoot.Text = config.ArchiveRoot;
             txtRunnerDir.Text = config.RunnerDir;
             txtGitUrl.Text = "";
+            if (txtGitHubApiToken != null) txtGitHubApiToken.Text = "";
             txtRunnerToken.Text = "";
             txtSlackToken.Text = "";
             txtSlackChannel.Text = "";
             txtTailscaleIP.Text = "";
+
+            if (isApiPolling) ToggleApiAutoPoller();
 
             cboBranch.Items.Clear();
             cboBranch.Text = "";
@@ -958,7 +979,13 @@ namespace BuildServerKit
             pnlLeft.Controls.Add(lblRunnerStatus);
             y += 24;
 
-            btnDownloadRunner = CreateFlatButton("[1] GitHub Runner 자동 다운로드 & 설치", new Point(14, y), new Size(346, 31), BgInput);
+            btnToggleApiPoller = CreateFlatButton("★ [추천] API 자동 감지 빌더 가동 (방장권한/Runner 불필요)", new Point(14, y), new Size(346, 36), AccentGreen);
+            btnToggleApiPoller.Font = new Font("Malgun Gothic", 9f, FontStyle.Bold);
+            btnToggleApiPoller.Click += (s, e) => ToggleApiAutoPoller();
+            pnlLeft.Controls.Add(btnToggleApiPoller);
+            y += 40;
+
+            btnDownloadRunner = CreateFlatButton("[1] GitHub Runner 자동 다운로드 & 설치 (선택)", new Point(14, y), new Size(346, 31), BgInput);
             btnDownloadRunner.Click += async (s, e) => await DownloadAndExtractRunnerAsync();
             pnlLeft.Controls.Add(btnDownloadRunner);
             y += 35;
@@ -1240,7 +1267,7 @@ namespace BuildServerKit
 
             Label lblHeaderGH = new Label
             {
-                Text = "■ GitHub Actions Self-Hosted Runner & 워크플로우 설정",
+                Text = "■ GitHub API 토큰 & Self-Hosted Runner 설정",
                 Font = new Font("Malgun Gothic", 11f, FontStyle.Bold),
                 ForeColor = Color.White,
                 Location = new Point(16, sy),
@@ -1248,6 +1275,26 @@ namespace BuildServerKit
             };
             page.Controls.Add(lblHeaderGH);
             sy += 34;
+
+            txtGitHubApiToken = AddTextSettingRow(page, "GitHub API 토큰 (ghp_...):", config.GitHubAccessToken, ref sy, true);
+
+            Button btnIssueTokenWeb = CreateFlatButton("→ 1. GitHub 웹에서 API 토큰(ghp_...) 발급 페이지 열기", new Point(210, sy), new Size(360, 31), AccentPurple);
+            btnIssueTokenWeb.Click += (s, e) =>
+            {
+                Process.Start("https://github.com/settings/tokens/new?description=UE_Build_Deploy_Manager&scopes=repo,workflow,read:org");
+            };
+
+            Button btnApplyApiToken = CreateFlatButton("✔ 2. 입력한 API 토큰으로 저장소/브랜치 즉시 연동", new Point(578, sy), new Size(320, 31), AccentGreen);
+            btnApplyApiToken.Click += async (s, e) =>
+            {
+                SaveConfigFromUI();
+                RefreshConnectedRepoState();
+                FetchBranchesViaGitHubApiAsync();
+                await ScanAllBranchesForWorkflowAsync(true);
+            };
+            page.Controls.Add(btnIssueTokenWeb);
+            page.Controls.Add(btnApplyApiToken);
+            sy += 40;
 
             txtRunnerToken = AddTextSettingRow(page, "Runner 등록 토큰 (선택):", config.RunnerToken, ref sy);
 
@@ -1358,6 +1405,7 @@ namespace BuildServerKit
 
                     txtProjectDir.Text = config.ProjectDir;
                     txtGitUrl.Text = config.GitRemoteUrl;
+                    if (txtGitHubApiToken != null) txtGitHubApiToken.Text = config.GitHubAccessToken;
 
                     cboBranch.Items.Clear();
                     cboBranch.Items.Add(repo.DefaultBranch);
@@ -1925,7 +1973,12 @@ namespace BuildServerKit
             bool isRunning = (runnerProcess != null && !runnerProcess.HasExited) ||
                              Process.GetProcessesByName("Runner.Listener").Length > 0;
 
-            if (isRunning)
+            if (isApiPolling)
+            {
+                lblRunnerStatus.Text = "● 상태: API 자동 감지 빌더 작동 중 (15초 주기 감시)";
+                lblRunnerStatus.ForeColor = AccentGreen;
+            }
+            else if (isRunning)
             {
                 lblRunnerStatus.Text = "● Runner 상태: 작동 중 (GitHub 커밋 대기/수신 중)";
                 lblRunnerStatus.ForeColor = AccentGreen;
@@ -1941,17 +1994,151 @@ namespace BuildServerKit
             }
             else if (File.Exists(configCmd))
             {
-                lblRunnerStatus.Text = "● Runner 상태: 다운로드됨 ([2. Runner 자동 등록] 필요)";
+                lblRunnerStatus.Text = "● 상태: API 자동 빌더 대기 중 (또는 Runner 등록 가능)";
                 lblRunnerStatus.ForeColor = AccentOrange;
                 btnStartRunner.Enabled = false;
                 btnStopRunner.Enabled = false;
             }
             else
             {
-                lblRunnerStatus.Text = "○ Runner 상태: 미설치 ([1. 자동 다운로드 & 설치] 클릭)";
+                lblRunnerStatus.Text = "○ 상태: 아래 [★ API 자동 감지 빌더 가동]을 눌러 시작";
                 lblRunnerStatus.ForeColor = FgSub;
                 btnStartRunner.Enabled = false;
                 btnStopRunner.Enabled = false;
+            }
+        }
+
+        private void ToggleApiAutoPoller()
+        {
+            SaveConfigFromUI();
+            if (isApiPolling)
+            {
+                isApiPolling = false;
+                if (apiPollTimer != null) apiPollTimer.Stop();
+                btnToggleApiPoller.Text = "★ [추천] API 자동 감지 빌더 가동 (방장권한/Runner 불필요)";
+                btnToggleApiPoller.BackColor = AccentGreen;
+                AppendConsole("■ [API 자동 감지 빌더] 감시가 중지되었습니다.", AccentOrange);
+                UpdateRunnerStatusUI();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) || string.IsNullOrWhiteSpace(config.GitHubAccessToken))
+            {
+                MessageBox.Show(
+                    "API 자동 감지 빌더를 가동하려면 먼저 GitHub API 토큰(ghp_...)과 저장소가 연결되어 있어야 합니다!\n\n" +
+                    "• 방법 1: 좌측 상단 [▶ GitHub 로그인 & 사용할 저장소 선택하기]에서 토큰 입력 후 저장소 선택\n" +
+                    "• 방법 2: 우측 [[3] 경로 & GitHub Actions / Slack 설정] 탭에서 'GitHub API 토큰 (ghp_...)' 입력 후 [✔ 2. 입력한 API 토큰으로 저장소/브랜치 즉시 연동] 클릭",
+                    "GitHub API 토큰 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                tabMain.SelectedIndex = 2;
+                return;
+            }
+
+            isApiPolling = true;
+            btnToggleApiPoller.Text = "■ API 자동 감지 빌더 중지 (현재 15초 주기로 감시 중)";
+            btnToggleApiPoller.BackColor = AccentRed;
+            UpdateRunnerStatusUI();
+
+            AppendConsole(string.Format("\n▶ [API 자동 감지 빌더 가동] '{0}' 저장소의 모든 브랜치 커밋 및 대기 중(Queued)인 Actions를 15초 주기로 자동 감시합니다!", config.ConnectedRepoFullName), AccentGreen);
+            AppendConsole("  (저장소 방장 권한이나 별도 Runner 등록 토큰 없이도 내 API 토큰만으로 자동 빌드가 즉시 실행됩니다.)", FgSub);
+
+            if (apiPollTimer == null)
+            {
+                apiPollTimer = new Timer { Interval = 15000 };
+                apiPollTimer.Tick += async (s, e) => await PollGitHubActionsAndBuildAsync();
+            }
+            apiPollTimer.Start();
+
+            var _ = PollGitHubActionsAndBuildAsync();
+        }
+
+        private async Task PollGitHubActionsAndBuildAsync()
+        {
+            if (!isApiPolling || isBuilding || isPollChecking) return;
+            if (string.IsNullOrWhiteSpace(config.ConnectedRepoFullName) || string.IsNullOrWhiteSpace(config.GitHubAccessToken)) return;
+
+            isPollChecking = true;
+            try
+            {
+                string triggerBranch = null;
+                string triggerSha = null;
+                string triggerRunId = null;
+                string triggerTitle = null;
+
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        var serializer = new JavaScriptSerializer();
+                        string runsUrl = string.Format("https://api.github.com/repos/{0}/actions/runs?per_page=10", config.ConnectedRepoFullName);
+                        string runsJson = GitHubApiGet(runsUrl, config.GitHubAccessToken);
+                        var runsDict = serializer.Deserialize<Dictionary<string, object>>(runsJson);
+                        if (runsDict != null && runsDict.ContainsKey("workflow_runs"))
+                        {
+                            var runs = runsDict["workflow_runs"] as System.Collections.ArrayList;
+                            if (runs != null)
+                            {
+                                foreach (var rObj in runs)
+                                {
+                                    var r = rObj as Dictionary<string, object>;
+                                    if (r == null) continue;
+                                    string status = r.ContainsKey("status") && r["status"] != null ? r["status"].ToString() : "";
+                                    string runId = r.ContainsKey("id") && r["id"] != null ? r["id"].ToString() : "";
+                                    string branch = r.ContainsKey("head_branch") && r["head_branch"] != null ? r["head_branch"].ToString() : "";
+                                    string sha = r.ContainsKey("head_sha") && r["head_sha"] != null ? r["head_sha"].ToString() : "";
+                                    string title = r.ContainsKey("display_title") && r["display_title"] != null ? r["display_title"].ToString() : "";
+
+                                    if (status == "queued" && !string.IsNullOrEmpty(runId) && !processedRunOrCommitIds.Contains("run:" + runId))
+                                    {
+                                        triggerRunId = runId;
+                                        triggerBranch = branch;
+                                        triggerSha = sha;
+                                        triggerTitle = title;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                });
+
+                if (!string.IsNullOrEmpty(triggerRunId) && !string.IsNullOrEmpty(triggerBranch))
+                {
+                    processedRunOrCommitIds.Add("run:" + triggerRunId);
+                    AppendConsole(string.Format("\n★ [API 자동 감지] '{0}' 브랜치에서 대기 중(Queued)인 워크플로우(#{1}: {2})를 감지했습니다!", triggerBranch, triggerRunId, triggerTitle), AccentGreen);
+
+                    // GitHub 웹에서 무한 Queued 상태로 남지 않도록 취소 요청 시도
+                    await Task.Run(() =>
+                    {
+                        try
+                        {
+                            string cancelUrl = string.Format("https://api.github.com/repos/{0}/actions/runs/{1}/cancel", config.ConnectedRepoFullName, triggerRunId);
+                            GitHubApiPost(cancelUrl, config.GitHubAccessToken);
+                            AppendConsole("[GitHub API] 웹상의 무한 Queued 대기 표시를 해제하고 이 전용 PC에서 직접 빌드를 인계받습니다.", Color.Cyan);
+                        }
+                        catch { }
+                    });
+
+                    cboBranch.Text = triggerBranch;
+
+                    // 워크스페이스에 아직 클론되지 않았다면 자동 클론
+                    if (string.IsNullOrWhiteSpace(config.ProjectDir) || !Directory.Exists(Path.Combine(config.ProjectDir, ".git")))
+                    {
+                        await CloneRepositoryAsync();
+                    }
+
+                    await RunGitSyncAsync(triggerBranch);
+
+                    string buildMode = (triggerBranch.Equals("main", StringComparison.OrdinalIgnoreCase) ||
+                                        triggerBranch.Equals("master", StringComparison.OrdinalIgnoreCase))
+                        ? "FullPackage" : "QuickVerify";
+
+                    await StartUEBuildAsync(buildMode, triggerBranch);
+                }
+            }
+            finally
+            {
+                isPollChecking = false;
             }
         }
 
@@ -2028,14 +2215,30 @@ namespace BuildServerKit
                 }
                 catch (Exception ex)
                 {
-                    AppendConsole("[GitHub API 안내] 자동 토큰 발급 실패 (" + ex.Message + "). 수동 등록 토큰을 확인합니다.", AccentOrange);
+                    AppendConsole("[GitHub API 안내] 공식 Runner 등록 토큰 발급 불가 (" + ex.Message + ").", AccentOrange);
                 }
             }
 
             if (string.IsNullOrWhiteSpace(regToken))
             {
-                MessageBox.Show("Runner 등록 토큰을 가져올 수 없습니다.\n[GitHub 로그인 & 사용할 저장소 선택하기]로 다시 로그인하거나, [[3] 설정] 탭에서 Runner 등록 토큰을 입력해 주세요.", "토큰 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                tabMain.SelectedIndex = 2;
+                var useApiPoller = MessageBox.Show(
+                    "현재 로그인된 계정이 저장소 소유자(Owner/Admin)가 아닌 팀원(Collaborator) 권한이거나 Runner 등록 토큰이 없습니다.\n" +
+                    "(GitHub 정책상 공식 Self-Hosted Runner 등록은 저장소 소유자 계정만 가능합니다.)\n\n" +
+                    "★ 방장 권한이나 Runner 등록 없이도 내 API 토큰만으로 모든 브랜치의 build.yml 커밋/Actions를 실시간 감지해 자동으로 빌드하는\n" +
+                    "[★ API 자동 감지 빌더]를 지금 바로 가동하시겠습니까?",
+                    "팀원(Collaborator) 계정 자동 빌드 전환 안내",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+
+                if (useApiPoller == DialogResult.Yes)
+                {
+                    if (!isApiPolling) ToggleApiAutoPoller();
+                    await ScanAllBranchesForWorkflowAsync(false);
+                }
+                else
+                {
+                    tabMain.SelectedIndex = 2;
+                }
                 return;
             }
 
@@ -2376,8 +2579,13 @@ namespace BuildServerKit
             SetStatus("▼ Git 동기화 중...", AccentBlue);
             AppendConsole(string.Format("\n=== [Git Sync] '{0}' 브랜치 최신 커밋으로 동기화 시작 ===", branch), Color.Cyan);
 
+            string authedUrl = GetAuthenticatedCloneUrl();
             await Task.Run(() =>
             {
+                if (!string.IsNullOrWhiteSpace(authedUrl))
+                {
+                    RunGitQuick(string.Format("remote set-url origin \"{0}\"", authedUrl));
+                }
                 RunProcessStream("git", "-c core.quotepath=false fetch --all --prune", config.ProjectDir);
                 RunProcessStream("git", "-c core.quotepath=false checkout -f " + branch, config.ProjectDir);
                 RunProcessStream("git", "-c core.quotepath=false reset --hard origin/" + branch, config.ProjectDir);
@@ -2400,6 +2608,11 @@ namespace BuildServerKit
         }
 
         private async void StartUEBuild(string mode, string branch)
+        {
+            await StartUEBuildAsync(mode, branch);
+        }
+
+        private async Task StartUEBuildAsync(string mode, string branch)
         {
             if (isBuilding)
             {
