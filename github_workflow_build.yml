@@ -1,0 +1,67 @@
+name: Unreal Engine Build & Package
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: '실행할 빌드 모드 선택 (QuickVerify: 빠른 검증 / FullPackage: 전체 .pak 패키징)'
+        required: true
+        default: 'FullPackage'
+        type: choice
+        options:
+          - QuickVerify
+          - FullPackage
+
+# 같은 작업 브랜치에 연속으로 커밋이 올라오면 이전 검증 빌드는 취소하고 최신 커밋만 빌드 (단, main 패키징은 끝까지 보장)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  ue-build:
+    name: UE Build (${{ github.ref_name }})
+    runs-on: self-hosted
+
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      TAILSCALE_IP: ${{ vars.TAILSCALE_IP }}
+
+    steps:
+      - name: 1. 전용 PC 고정 워크스페이스 Git 동기화
+        shell: powershell
+        run: |
+          $RepoName  = "${{ github.event.repository.name }}"
+          $Workspace = "C:\BuildSystem\Workspace\$RepoName"
+          $CloneUrl  = "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          if (-not (Test-Path "$Workspace\.git")) {
+              New-Item -ItemType Directory -Force -Path (Split-Path $Workspace) | Out-Null
+              git clone $CloneUrl $Workspace
+          }
+          Set-Location $Workspace
+          git remote set-url origin $CloneUrl
+          git fetch --all --prune
+          git checkout -f "${{ github.sha }}"
+
+      - name: 2. 빌드 모드 결정 및 Run-UEBuild.ps1 실행 (로그 저장 & Slack 전송)
+        shell: powershell
+        run: |
+          $RepoName  = "${{ github.event.repository.name }}"
+          $Workspace = "C:\BuildSystem\Workspace\$RepoName"
+
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+              $Mode = "${{ inputs.build_mode }}"
+          } elseif ("${{ github.ref_name }}" -eq "main" -or "${{ github.ref_name }}" -eq "master") {
+              $Mode = "FullPackage"
+          } else {
+              $Mode = "QuickVerify"
+          }
+
+          Write-Host "실행 모드: $Mode / 브랜치: ${{ github.ref_name }}" -ForegroundColor Cyan
+          & "C:\BuildSystem\Scripts\Run-UEBuild.ps1" `
+              -BuildMode $Mode `
+              -BranchName "${{ github.ref_name }}" `
+              -ProjectDir $Workspace

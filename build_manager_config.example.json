@@ -1,0 +1,19 @@
+{
+  "UE5Root": "C:\\Program Files\\Epic Games\\UE_5.8",
+  "WorkspaceRoot": "C:\\BuildSystem\\Workspace",
+  "ProjectDir": "",
+  "SharedAssetsDir": "C:\\BuildSystem\\SharedAssets",
+  "ArchiveRoot": "C:\\BuildArchive",
+  "RunnerDir": "C:\\actions-runner",
+  "GitHubUser": "",
+  "GitHubAccessToken": "",
+  "ConnectedRepoFullName": "",
+  "GitRemoteUrl": "",
+  "GitHubRepoUrl": "",
+  "RunnerToken": "",
+  "LastBranch": "",
+  "SlackBotToken": "",
+  "SlackChannelId": "",
+  "TailscaleIP": "",
+  "AutoSendSlack": true
+}

@@ -1,0 +1,3 @@
+@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'; if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }; Stop-Process -Name 'UE_BuildManager' -Force -ErrorAction SilentlyContinue; & $csc /nologo /target:winexe /optimize+ /out:'%~dp0UE_BuildManager.exe' /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll '%~dp0UE_BuildManager.cs'; if ($LASTEXITCODE -eq 0) { Write-Host '[BuildServerKit] UE_BuildManager.exe compiled successfully!' -ForegroundColor Green } else { exit $LASTEXITCODE } }"
+if "%1"=="" pause

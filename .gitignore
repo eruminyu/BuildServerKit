@@ -1,0 +1,30 @@
+# Local runtime configuration & credentials (NEVER commit personal tokens!)
+build_manager_config.json
+
+# Logs and local build outputs
+*.log
+Logs/
+Packages/
+Saved_Logs/
+Engine_UAT_Logs/
+
+# GitHub Actions Self-Hosted Runner local files
+actions-runner/
+_work/
+.runner
+.credentials
+.credentials_rsaparams
+
+# Release packaging & temporary artifacts
+dist/
+release/
+*.zip
+*.pdb
+*.user
+
+# OS / IDE files
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
