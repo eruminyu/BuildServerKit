@@ -34,21 +34,25 @@ jobs:
       - name: 1. 전용 PC 고정 워크스페이스 Git 동기화
         shell: powershell
         run: |
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $RepoName  = "${{ github.event.repository.name }}"
           $Workspace = "C:\BuildSystem\Workspace\$RepoName"
           $CloneUrl  = "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           if (-not (Test-Path "$Workspace\.git")) {
               New-Item -ItemType Directory -Force -Path (Split-Path $Workspace) | Out-Null
-              git clone $CloneUrl $Workspace
+              git -c core.quotepath=false clone $CloneUrl $Workspace
           }
           Set-Location $Workspace
           git remote set-url origin $CloneUrl
-          git fetch --all --prune
-          git checkout -f "${{ github.sha }}"
+          git -c core.quotepath=false fetch --all --prune
+          git -c core.quotepath=false checkout -f "${{ github.sha }}"
 
       - name: 2. 빌드 모드 결정 및 Run-UEBuild.ps1 실행 (로그 저장 & Slack 전송)
         shell: powershell
         run: |
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $RepoName  = "${{ github.event.repository.name }}"
           $Workspace = "C:\BuildSystem\Workspace\$RepoName"
 
