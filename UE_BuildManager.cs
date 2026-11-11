@@ -18,8 +18,8 @@ using System.Web.Script.Serialization;
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.5.0")]
-[assembly: AssemblyFileVersion("1.0.5.0")]
+[assembly: AssemblyVersion("1.0.6.0")]
+[assembly: AssemblyFileVersion("1.0.6.0")]
 
 namespace BuildServerKit
 {
@@ -116,6 +116,7 @@ namespace BuildServerKit
         public string GitHubRepoUrl { get; set; }
         public string RunnerToken { get; set; }
         public string LastBranch { get; set; }
+        public string ClientConfig { get; set; }
 
         // Slack & Network Info (Default: Empty for clean distribution)
         public string SlackBotToken { get; set; }
@@ -139,6 +140,7 @@ namespace BuildServerKit
             GitHubRepoUrl = "";
             RunnerToken = "";
             LastBranch = "";
+            ClientConfig = "Development";
 
             SlackBotToken = "";
             SlackChannelId = "";
@@ -521,6 +523,7 @@ namespace BuildServerKit
         private Label lblConnectedRepo;
         private Button btnConnectGitHub;
         private ComboBox cboBranch;
+        private ComboBox cboClientConfig;
         private Button btnRefreshBranches;
         private Label lblWorkflowStatus;
         private Button btnScanWorkflows;
@@ -679,6 +682,8 @@ namespace BuildServerKit
                     byte[] raw = File.ReadAllBytes(configPath);
                     string json = EncodingHelper.DecodeSmartBytes(raw, raw.Length);
                     config = new JavaScriptSerializer().Deserialize<AppConfig>(json) ?? new AppConfig();
+                    if (string.IsNullOrWhiteSpace(config.ClientConfig))
+                        config.ClientConfig = "Development";
                 }
                 else
                 {
@@ -722,6 +727,8 @@ namespace BuildServerKit
                 config.SlackChannelId = txtSlackChannel.Text.Trim();
                 config.TailscaleIP = txtTailscaleIP.Text.Trim();
                 config.LastBranch = cboBranch.Text.Trim();
+                if (cboClientConfig != null)
+                    config.ClientConfig = GetSelectedClientConfig();
                 config.AutoSendSlack = chkAutoSlack.Checked;
             }
             try
@@ -780,6 +787,8 @@ namespace BuildServerKit
 
             cboBranch.Items.Clear();
             cboBranch.Text = "";
+            if (cboClientConfig != null && cboClientConfig.Items.Count > 0)
+                cboClientConfig.SelectedIndex = 0;
 
             rtbConsole.Clear();
             rtbErrorsOnly.Clear();
@@ -937,7 +946,34 @@ namespace BuildServerKit
             btnGitSync = CreateFlatButton("▼ 선택한 브랜치 최신 커밋 가져오기 (Git Sync)", new Point(14, y), new Size(346, 31), Color.FromArgb(60, 68, 82));
             btnGitSync.Click += async (s, e) => await RunGitSyncAsync(cboBranch.Text.Trim());
             pnlLeft.Controls.Add(btnGitSync);
-            y += 36;
+            y += 35;
+
+            Label lblCfg = new Label { Text = "패키징 구성:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
+            cboClientConfig = new ComboBox
+            {
+                Location = new Point(98, y),
+                Width = 262,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboClientConfig.Items.AddRange(new object[]
+            {
+                "Development (디버그/콘솔 포함 - 기본)",
+                "Shipping (최종 배포/최적화)",
+                "DebugGame (C++ 심층 디버깅)"
+            });
+            if (string.Equals(config.ClientConfig, "Shipping", StringComparison.OrdinalIgnoreCase))
+                cboClientConfig.SelectedIndex = 1;
+            else if (string.Equals(config.ClientConfig, "DebugGame", StringComparison.OrdinalIgnoreCase))
+                cboClientConfig.SelectedIndex = 2;
+            else
+                cboClientConfig.SelectedIndex = 0;
+            cboClientConfig.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+            pnlLeft.Controls.Add(lblCfg);
+            pnlLeft.Controls.Add(cboClientConfig);
+            y += 32;
 
             btnQuickVerify = CreateFlatButton("▶ 빠른 검증 빌드 (C++ 컴파일 + 증분 쿠킹)", new Point(14, y), new Size(346, 40), AccentGreen);
             btnQuickVerify.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
@@ -2730,6 +2766,23 @@ namespace BuildServerKit
             return files.Length > 0 ? files[0] : null;
         }
 
+        private string GetSelectedClientConfig()
+        {
+            if (cboClientConfig != null && cboClientConfig.SelectedItem != null)
+            {
+                string txt = cboClientConfig.SelectedItem.ToString();
+                if (txt.StartsWith("Shipping", StringComparison.OrdinalIgnoreCase)) return "Shipping";
+                if (txt.StartsWith("DebugGame", StringComparison.OrdinalIgnoreCase)) return "DebugGame";
+                return "Development";
+            }
+            if (!string.IsNullOrWhiteSpace(config.ClientConfig))
+            {
+                if (config.ClientConfig.StartsWith("Shipping", StringComparison.OrdinalIgnoreCase)) return "Shipping";
+                if (config.ClientConfig.StartsWith("DebugGame", StringComparison.OrdinalIgnoreCase)) return "DebugGame";
+            }
+            return "Development";
+        }
+
         private async void StartUEBuild(string mode, string branch)
         {
             await StartUEBuildAsync(mode, branch);
@@ -2790,20 +2843,21 @@ namespace BuildServerKit
             currentLogFilePath = Path.Combine(currentLogArchiveDir, "Full_UAT_Console.log");
 
             string uatArgs;
+            string clientCfg = GetSelectedClientConfig();
             if (mode == "QuickVerify")
             {
-                SetStatus("▶ 빠른 검증 빌드 진행 중...", AccentGreen);
-                uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig=Development -build -cook -iterate -skipstage -utf8output", uproject);
+                SetStatus(string.Format("▶ 빠른 검증 빌드 ({0}) 진행 중...", clientCfg), AccentGreen);
+                uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig={1} -build -cook -iterate -skipstage -utf8output", uproject, clientCfg);
             }
             else
             {
-                SetStatus("★ 전체 패키징 빌드 진행 중...", AccentBlue);
+                SetStatus(string.Format("★ 전체 패키징 빌드 ({0}) 진행 중...", clientCfg), AccentBlue);
                 string pkgOutDir = Path.Combine(config.ArchiveRoot, "Packages", buildId);
                 Directory.CreateDirectory(pkgOutDir);
-                uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig=Development -build -cook -allmaps -stage -pak -archive -archivedirectory=\"{1}\" -utf8output", uproject, pkgOutDir);
+                uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig={1} -build -cook -allmaps -stage -pak -archive -archivedirectory=\"{2}\" -utf8output", uproject, clientCfg, pkgOutDir);
             }
 
-            AppendConsole(string.Format("=== [{0} - {1}] 빌드 시작 (브랜치: {2}, 커밋: {3} by {4}) ===", projectName, mode, safeBranch, commitHash, commitAuthor), Color.Cyan);
+            AppendConsole(string.Format("=== [{0} - {1} ({2})] 빌드 시작 (브랜치: {3}, 커밋: {4} by {5}) ===", projectName, mode, clientCfg, safeBranch, commitHash, commitAuthor), Color.Cyan);
             AppendConsole("대상 프로젝트: " + uproject, FgSub);
             AppendConsole("로그 실시간 저장 경로: " + currentLogFilePath + "\n", FgSub);
 
@@ -3029,7 +3083,8 @@ namespace BuildServerKit
             {
                 try
                 {
-                    string modeLabel = (mode == "QuickVerify") ? "빠른 컴파일·쿠킹 검증" : "전체 패키징 빌드";
+                    string clientCfg = GetSelectedClientConfig();
+                    string modeLabel = ((mode == "QuickVerify") ? "빠른 컴파일·쿠킹 검증" : "전체 패키징 빌드") + " [" + clientCfg + "]";
                     string tsIp = GetServerIPv4ForSlack();
                     string sharedPath = Regex.Replace(archiveDir, @"^[A-Za-z]:\\BuildArchive", @"\\" + tsIp + @"\BuildArchive", RegexOptions.IgnoreCase);
 

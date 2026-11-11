@@ -2,6 +2,7 @@
     [ValidateSet("QuickVerify", "FullPackage")]
     [string]$BuildMode = "QuickVerify",
     [string]$BranchName = "main",
+    [string]$ClientConfig = "",
     [string]$ProjectDir = "",
     [string]$UE5Root = "",
     [string]$SharedAssets = "C:\BuildSystem\SharedAssets",
@@ -28,9 +29,11 @@ if (Test-Path $ConfigPath) {
         if ([string]::IsNullOrWhiteSpace($ProjectDir) -and $Cfg.ProjectDir) { $ProjectDir = $Cfg.ProjectDir }
         if ($Cfg.SharedAssetsDir) { $SharedAssets = $Cfg.SharedAssetsDir }
         if ($Cfg.ArchiveRoot) { $ArchiveRoot = $Cfg.ArchiveRoot }
+        if ([string]::IsNullOrWhiteSpace($ClientConfig) -and $Cfg.ClientConfig) { $ClientConfig = $Cfg.ClientConfig }
     } catch {}
 }
 
+if ([string]::IsNullOrWhiteSpace($ClientConfig)) { $ClientConfig = "Development" }
 if ([string]::IsNullOrWhiteSpace($UE5Root)) { $UE5Root = "C:\Program Files\Epic Games\UE_5.8" }
 if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
     # Workspace 내 첫 번째 Git 저장소 자동 탐색
@@ -154,7 +157,7 @@ if ($BuildMode -eq "QuickVerify") {
         "-project=`"$UProjectFile`"",
         "-noP4",
         "-platform=Win64",
-        "-clientconfig=Development",
+        "-clientconfig=$ClientConfig",
         "-build",
         "-cook",
         "-iterate",
@@ -169,7 +172,7 @@ if ($BuildMode -eq "QuickVerify") {
         "-project=`"$UProjectFile`"",
         "-noP4",
         "-platform=Win64",
-        "-clientconfig=Development",
+        "-clientconfig=$ClientConfig",
         "-build",
         "-cook",
         "-allmaps",
