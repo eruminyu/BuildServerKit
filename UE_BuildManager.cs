@@ -1,4 +1,5 @@
 ﻿using System;
+using System.CodeDom.Compiler;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -13,13 +14,14 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
+using Microsoft.CSharp;
 
 [assembly: AssemblyTitle("BuildServerKit - Unreal Engine Build & GitHub Actions Manager")]
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.6.0")]
-[assembly: AssemblyFileVersion("1.0.6.0")]
+[assembly: AssemblyVersion("1.0.7.0")]
+[assembly: AssemblyFileVersion("1.0.7.0")]
 
 namespace BuildServerKit
 {
@@ -118,6 +120,14 @@ namespace BuildServerKit
         public string LastBranch { get; set; }
         public string ClientConfig { get; set; }
 
+        // Default Game Packaging Display & Scalability Options
+        public string DefaultQualityPreset { get; set; }
+        public string DefaultResolution { get; set; }
+        public string DefaultWindowMode { get; set; }
+        public int DefaultFrameRateLimit { get; set; }
+        public bool DefaultVSync { get; set; }
+        public bool GenerateLauncherOnPackage { get; set; }
+
         // Slack & Network Info (Default: Empty for clean distribution)
         public string SlackBotToken { get; set; }
         public string SlackChannelId { get; set; }
@@ -141,6 +151,13 @@ namespace BuildServerKit
             RunnerToken = "";
             LastBranch = "";
             ClientConfig = "Development";
+
+            DefaultQualityPreset = "Epic";
+            DefaultResolution = "1920x1080";
+            DefaultWindowMode = "WindowedFullscreen";
+            DefaultFrameRateLimit = 0;
+            DefaultVSync = true;
+            GenerateLauncherOnPackage = true;
 
             SlackBotToken = "";
             SlackChannelId = "";
@@ -524,6 +541,11 @@ namespace BuildServerKit
         private Button btnConnectGitHub;
         private ComboBox cboBranch;
         private ComboBox cboClientConfig;
+        private ComboBox cboQualityPreset;
+        private ComboBox cboResolution;
+        private ComboBox cboWindowMode;
+        private CheckBox chkGenerateLauncher;
+        private Button btnCreateLauncherManual;
         private Button btnRefreshBranches;
         private Label lblWorkflowStatus;
         private Button btnScanWorkflows;
@@ -684,6 +706,12 @@ namespace BuildServerKit
                     config = new JavaScriptSerializer().Deserialize<AppConfig>(json) ?? new AppConfig();
                     if (string.IsNullOrWhiteSpace(config.ClientConfig))
                         config.ClientConfig = "Development";
+                    if (string.IsNullOrWhiteSpace(config.DefaultQualityPreset))
+                        config.DefaultQualityPreset = "Epic";
+                    if (string.IsNullOrWhiteSpace(config.DefaultResolution))
+                        config.DefaultResolution = "1920x1080";
+                    if (string.IsNullOrWhiteSpace(config.DefaultWindowMode))
+                        config.DefaultWindowMode = "WindowedFullscreen";
                 }
                 else
                 {
@@ -729,6 +757,14 @@ namespace BuildServerKit
                 config.LastBranch = cboBranch.Text.Trim();
                 if (cboClientConfig != null)
                     config.ClientConfig = GetSelectedClientConfig();
+                if (cboQualityPreset != null)
+                    config.DefaultQualityPreset = GetSelectedQualityPresetName();
+                if (cboResolution != null && !string.IsNullOrWhiteSpace(cboResolution.Text))
+                    config.DefaultResolution = cboResolution.Text.Trim();
+                if (cboWindowMode != null)
+                    config.DefaultWindowMode = GetSelectedWindowModeName();
+                if (chkGenerateLauncher != null)
+                    config.GenerateLauncherOnPackage = chkGenerateLauncher.Checked;
                 config.AutoSendSlack = chkAutoSlack.Checked;
             }
             try
@@ -789,6 +825,14 @@ namespace BuildServerKit
             cboBranch.Text = "";
             if (cboClientConfig != null && cboClientConfig.Items.Count > 0)
                 cboClientConfig.SelectedIndex = 0;
+            if (cboQualityPreset != null && cboQualityPreset.Items.Count > 3)
+                cboQualityPreset.SelectedIndex = 3;
+            if (cboResolution != null && cboResolution.Items.Count > 2)
+                cboResolution.SelectedIndex = 2;
+            if (cboWindowMode != null && cboWindowMode.Items.Count > 0)
+                cboWindowMode.SelectedIndex = 0;
+            if (chkGenerateLauncher != null)
+                chkGenerateLauncher.Checked = true;
 
             rtbConsole.Clear();
             rtbErrorsOnly.Clear();
@@ -973,7 +1017,87 @@ namespace BuildServerKit
             cboClientConfig.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
             pnlLeft.Controls.Add(lblCfg);
             pnlLeft.Controls.Add(cboClientConfig);
-            y += 32;
+            y += 30;
+
+            Label lblPreset = new Label { Text = "그래픽 기본:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
+            cboQualityPreset = new ComboBox
+            {
+                Location = new Point(98, y),
+                Width = 262,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboQualityPreset.Items.AddRange(new object[]
+            {
+                "Low (낮음 - 저사양/최고 프레임)",
+                "Medium (중간 - 밸런스 옵션)",
+                "High (높음 - 고품질 라이팅)",
+                "Epic (에픽 - 언리얼 기본 프리셋)",
+                "Cinematic (시네마틱 - 시연용 최고품질)"
+            });
+            cboQualityPreset.SelectedIndex = GameLauncherBuilder.PresetNameToIndex(config.DefaultQualityPreset);
+            cboQualityPreset.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+            pnlLeft.Controls.Add(lblPreset);
+            pnlLeft.Controls.Add(cboQualityPreset);
+            y += 30;
+
+            Label lblRes = new Label { Text = "기본 해상도:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
+            cboResolution = new ComboBox
+            {
+                Location = new Point(98, y),
+                Width = 132,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            string[] stdRes = new[] { "1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160" };
+            cboResolution.Items.AddRange(stdRes);
+            int resIdx = Array.IndexOf(stdRes, config.DefaultResolution);
+            cboResolution.SelectedIndex = resIdx >= 0 ? resIdx : 2;
+            cboResolution.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+
+            cboWindowMode = new ComboBox
+            {
+                Location = new Point(236, y),
+                Width = 124,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboWindowMode.Items.AddRange(new object[]
+            {
+                "테두리없는창",
+                "전체화면",
+                "창모드"
+            });
+            if (string.Equals(config.DefaultWindowMode, "Fullscreen", StringComparison.OrdinalIgnoreCase))
+                cboWindowMode.SelectedIndex = 1;
+            else if (string.Equals(config.DefaultWindowMode, "Windowed", StringComparison.OrdinalIgnoreCase))
+                cboWindowMode.SelectedIndex = 2;
+            else
+                cboWindowMode.SelectedIndex = 0;
+            cboWindowMode.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+
+            pnlLeft.Controls.Add(lblRes);
+            pnlLeft.Controls.Add(cboResolution);
+            pnlLeft.Controls.Add(cboWindowMode);
+            y += 28;
+
+            chkGenerateLauncher = new CheckBox
+            {
+                Text = "패키징 시 '게임 옵션 선택 런처.exe' 자동 동봉",
+                Location = new Point(14, y),
+                AutoSize = true,
+                Checked = config.GenerateLauncherOnPackage,
+                ForeColor = Color.FromArgb(145, 225, 175)
+            };
+            chkGenerateLauncher.CheckedChanged += (s, e) => SaveConfigFromUI();
+            pnlLeft.Controls.Add(chkGenerateLauncher);
+            y += 26;
 
             btnQuickVerify = CreateFlatButton("▶ 빠른 검증 빌드 (C++ 컴파일 + 증분 쿠킹)", new Point(14, y), new Size(346, 40), AccentGreen);
             btnQuickVerify.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
@@ -985,7 +1109,12 @@ namespace BuildServerKit
             btnFullPackage.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
             btnFullPackage.Click += (s, e) => StartUEBuild("FullPackage", cboBranch.Text.Trim());
             pnlLeft.Controls.Add(btnFullPackage);
-            y += 45;
+            y += 44;
+
+            btnCreateLauncherManual = CreateFlatButton("★ 기존 패키징 폴더에 '게임 옵션 런처.exe' 즉시 생성", new Point(14, y), new Size(346, 29), AccentPurple);
+            btnCreateLauncherManual.Click += (s, e) => CreateLauncherInExistingFolderDialog();
+            pnlLeft.Controls.Add(btnCreateLauncherManual);
+            y += 33;
 
             btnStopBuild = CreateFlatButton("■ 진행 중인 빌드 강제 중단", new Point(14, y), new Size(346, 30), AccentRed);
             btnStopBuild.Enabled = false;
@@ -2783,6 +2912,77 @@ namespace BuildServerKit
             return "Development";
         }
 
+        private string GetSelectedQualityPresetName()
+        {
+            if (cboQualityPreset != null && cboQualityPreset.SelectedIndex >= 0)
+            {
+                return GameLauncherBuilder.IndexToPresetName(cboQualityPreset.SelectedIndex);
+            }
+            return string.IsNullOrWhiteSpace(config.DefaultQualityPreset) ? "Epic" : config.DefaultQualityPreset;
+        }
+
+        private string GetSelectedWindowModeName()
+        {
+            if (cboWindowMode != null && cboWindowMode.SelectedIndex >= 0)
+            {
+                if (cboWindowMode.SelectedIndex == 1) return "Fullscreen";
+                if (cboWindowMode.SelectedIndex == 2) return "Windowed";
+                return "WindowedFullscreen";
+            }
+            return string.IsNullOrWhiteSpace(config.DefaultWindowMode) ? "WindowedFullscreen" : config.DefaultWindowMode;
+        }
+
+        private void CreateLauncherInExistingFolderDialog()
+        {
+            SaveConfigFromUI();
+            string startDir = Path.Combine(config.ArchiveRoot, "Packages");
+            if (!Directory.Exists(startDir)) startDir = config.ArchiveRoot;
+
+            using (var fbd = new FolderBrowserDialog
+            {
+                Description = "언리얼 패키징이 완료된 결과물 폴더(예: C:\\BuildArchive\\Packages\\빌드ID 또는 Windows 폴더)를 선택하세요.",
+                SelectedPath = Directory.Exists(startDir) ? startDir : ""
+            })
+            {
+                if (fbd.ShowDialog(this) != DialogResult.OK) return;
+
+                string uproject = FindUProjectFile();
+                string projHint = !string.IsNullOrEmpty(uproject) ? Path.GetFileNameWithoutExtension(uproject) : "";
+                string launcherPath, err;
+                bool ok = GameLauncherBuilder.GenerateLauncherInPackage(
+                    fbd.SelectedPath,
+                    projHint,
+                    config.DefaultQualityPreset,
+                    config.DefaultResolution,
+                    config.DefaultWindowMode,
+                    config.DefaultFrameRateLimit,
+                    config.DefaultVSync,
+                    out launcherPath,
+                    out err);
+
+                if (ok)
+                {
+                    AppendConsole("✔ [옵션 런처 생성 완료] " + launcherPath, AccentGreen);
+                    var runNow = MessageBox.Show(
+                        "패키징 폴더에 언리얼 그래픽 프리셋 & 해상도 선택 런처 생성이 완료되었습니다!\n\n" +
+                        "▶ 생성 경로: " + launcherPath + "\n\n" +
+                        "지금 바로 런처 화면을 띄워서 확인해 보시겠습니까?",
+                        "게임 실행 옵션 런처 생성 완료",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information);
+                    if (runNow == DialogResult.Yes)
+                    {
+                        Process.Start(new ProcessStartInfo(launcherPath) { WorkingDirectory = Path.GetDirectoryName(launcherPath) });
+                    }
+                }
+                else
+                {
+                    AppendConsole("[옵션 런처 생성 실패] " + err, AccentRed);
+                    MessageBox.Show("런처 생성 실패:\n" + err, "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
         private async void StartUEBuild(string mode, string branch)
         {
             await StartUEBuildAsync(mode, branch);
@@ -2843,6 +3043,7 @@ namespace BuildServerKit
             currentLogFilePath = Path.Combine(currentLogArchiveDir, "Full_UAT_Console.log");
 
             string uatArgs;
+            string pkgOutDir = null;
             string clientCfg = GetSelectedClientConfig();
             if (mode == "QuickVerify")
             {
@@ -2852,19 +3053,66 @@ namespace BuildServerKit
             else
             {
                 SetStatus(string.Format("★ 전체 패키징 빌드 ({0}) 진행 중...", clientCfg), AccentBlue);
-                string pkgOutDir = Path.Combine(config.ArchiveRoot, "Packages", buildId);
+                pkgOutDir = Path.Combine(config.ArchiveRoot, "Packages", buildId);
                 Directory.CreateDirectory(pkgOutDir);
                 uatArgs = string.Format("BuildCookRun -project=\"{0}\" -noP4 -platform=Win64 -clientconfig={1} -build -cook -allmaps -stage -pak -archive -archivedirectory=\"{2}\" -utf8output", uproject, clientCfg, pkgOutDir);
             }
 
             AppendConsole(string.Format("=== [{0} - {1} ({2})] 빌드 시작 (브랜치: {3}, 커밋: {4} by {5}) ===", projectName, mode, clientCfg, safeBranch, commitHash, commitAuthor), Color.Cyan);
             AppendConsole("대상 프로젝트: " + uproject, FgSub);
+            if (mode == "FullPackage")
+            {
+                AppendConsole(string.Format("패키징 그래픽/디스플레이 기본값: 프리셋={0}, 해상도={1}, 창모드={2}, 옵션런처동봉={3}",
+                    config.DefaultQualityPreset, config.DefaultResolution, config.DefaultWindowMode, config.GenerateLauncherOnPackage ? "ON" : "OFF"), Color.FromArgb(145, 225, 175));
+            }
             AppendConsole("로그 실시간 저장 경로: " + currentLogFilePath + "\n", FgSub);
+
+            // 전체 패키징 시 Config/DefaultGameUserSettings.ini에 기본 그래픽 프리셋·해상도를 구워넣고 종료 후 원본 상태 복원
+            string defaultGusPath = Path.Combine(config.ProjectDir, @"Config\DefaultGameUserSettings.ini");
+            bool hadOrigGus = false;
+            byte[] origGusBytes = null;
+            if (mode == "FullPackage")
+            {
+                try
+                {
+                    string cfgDir = Path.GetDirectoryName(defaultGusPath);
+                    if (!Directory.Exists(cfgDir)) Directory.CreateDirectory(cfgDir);
+                    hadOrigGus = File.Exists(defaultGusPath);
+                    if (hadOrigGus) origGusBytes = File.ReadAllBytes(defaultGusPath);
+                    GameLauncherBuilder.WriteMergedGameUserSettingsIni(
+                        defaultGusPath,
+                        config.DefaultQualityPreset,
+                        100,
+                        config.DefaultResolution,
+                        config.DefaultWindowMode,
+                        config.DefaultFrameRateLimit,
+                        config.DefaultVSync);
+                }
+                catch { }
+            }
 
             buildStartTime = DateTime.Now;
             uiDurationTimer.Start();
 
-            int exitCode = await Task.Run(() => RunUATWithLiveLog(runUat, uatArgs, config.ProjectDir, currentLogFilePath));
+            int exitCode = -1;
+            try
+            {
+                exitCode = await Task.Run(() => RunUATWithLiveLog(runUat, uatArgs, config.ProjectDir, currentLogFilePath));
+            }
+            finally
+            {
+                if (mode == "FullPackage")
+                {
+                    try
+                    {
+                        if (hadOrigGus && origGusBytes != null)
+                            File.WriteAllBytes(defaultGusPath, origGusBytes);
+                        else if (!hadOrigGus && File.Exists(defaultGusPath))
+                            File.Delete(defaultGusPath);
+                    }
+                    catch { }
+                }
+            }
 
             uiDurationTimer.Stop();
             var elapsed = DateTime.Now - buildStartTime;
@@ -2883,6 +3131,39 @@ namespace BuildServerKit
             {
                 SetStatus("✔ 빌드 성공 (" + durationStr + ")", AccentGreen);
                 AppendConsole(string.Format("\n✔ === 빌드/패키징이 성공적으로 완료되었습니다! (소요 시간: {0}) ===", durationStr), AccentGreen);
+
+                if (mode == "FullPackage" && !string.IsNullOrEmpty(pkgOutDir) && Directory.Exists(pkgOutDir))
+                {
+                    if (config.GenerateLauncherOnPackage)
+                    {
+                        string launcherPath, launcherErr;
+                        bool genOk = GameLauncherBuilder.GenerateLauncherInPackage(
+                            pkgOutDir,
+                            projectName,
+                            config.DefaultQualityPreset,
+                            config.DefaultResolution,
+                            config.DefaultWindowMode,
+                            config.DefaultFrameRateLimit,
+                            config.DefaultVSync,
+                            out launcherPath,
+                            out launcherErr);
+                        if (genOk)
+                            AppendConsole("✔ [게임 실행 옵션 런처 동봉 완료] " + launcherPath, AccentGreen);
+                        else
+                            AppendConsole("[옵션 런처 생성 경고] " + launcherErr, AccentOrange);
+                    }
+                    else
+                    {
+                        GameLauncherBuilder.ApplyDefaultSettingsToPackageOnly(
+                            pkgOutDir,
+                            projectName,
+                            config.DefaultQualityPreset,
+                            config.DefaultResolution,
+                            config.DefaultWindowMode,
+                            config.DefaultFrameRateLimit,
+                            config.DefaultVSync);
+                    }
+                }
             }
             else
             {
@@ -3090,8 +3371,15 @@ namespace BuildServerKit
 
                     if (exitCode == 0)
                     {
-                        string okMsg = string.Format("*[{0} 빌드 성공]* ({1} 완료)\n• *브랜치/커밋:* `{2}` (`{3}`) by *{4}*\n• *커밋 메시지:* {5}\n• *소요 시간:* {6}\n• *공유 폴더:* `{7}`",
-                            projectName, modeLabel, branch, hash, author, msg, duration, sharedPath);
+                        string extraPkgInfo = "";
+                        if (mode == "FullPackage")
+                        {
+                            string pkgSharePath = sharedPath.Replace(@"\BuildArchive\Logs\", @"\BuildArchive\Packages\");
+                            extraPkgInfo = string.Format("\n• *패키징 결과물 폴더:* `{0}`\n• *실행 옵션:* `{1}_Launcher.exe` (그래픽 프리셋 {2} / {3} 선택 실행기 동봉)",
+                                pkgSharePath, projectName, config.DefaultQualityPreset, config.DefaultResolution);
+                        }
+                        string okMsg = string.Format("*[{0} 빌드 성공]* ({1} 완료)\n• *브랜치/커밋:* `{2}` (`{3}`) by *{4}*\n• *커밋 메시지:* {5}\n• *소요 시간:* {6}\n• *로그 공유 폴더:* `{7}`{8}",
+                            projectName, modeLabel, branch, hash, author, msg, duration, sharedPath, extraPkgInfo);
                         PostSlackChatMessage(okMsg);
                         AppendConsole("[Slack] 성공 알림 전송 완료!", AccentGreen);
                         return;
@@ -3379,11 +3667,861 @@ namespace BuildServerKit
         }
     }
 
-    static class Program
+    public static class GameLauncherBuilder
     {
+        private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
+
+        public static int PresetNameToIndex(string preset)
+        {
+            if (string.IsNullOrWhiteSpace(preset)) return 3;
+            string p = preset.Trim();
+            if (p.StartsWith("Low", StringComparison.OrdinalIgnoreCase)) return 0;
+            if (p.StartsWith("Medium", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (p.StartsWith("High", StringComparison.OrdinalIgnoreCase)) return 2;
+            if (p.StartsWith("Cinematic", StringComparison.OrdinalIgnoreCase)) return 4;
+            return 3; // Epic
+        }
+
+        public static string IndexToPresetName(int idx)
+        {
+            switch (idx)
+            {
+                case 0: return "Low";
+                case 1: return "Medium";
+                case 2: return "High";
+                case 4: return "Cinematic";
+                default: return "Epic";
+            }
+        }
+
+        public static int WindowModeNameToUeMode(string winMode)
+        {
+            if (string.IsNullOrWhiteSpace(winMode)) return 1; // WindowedFullscreen
+            if (winMode.Equals("Fullscreen", StringComparison.OrdinalIgnoreCase)) return 0;
+            if (winMode.Equals("Windowed", StringComparison.OrdinalIgnoreCase)) return 2;
+            return 1;
+        }
+
+        public static void ParseResolution(string res, out int w, out int h)
+        {
+            w = 1920;
+            h = 1080;
+            if (string.IsNullOrWhiteSpace(res)) return;
+            var m = Regex.Match(res, @"(\d{3,5})\s*[xX]\s*(\d{3,5})");
+            if (m.Success)
+            {
+                int.TryParse(m.Groups[1].Value, out w);
+                int.TryParse(m.Groups[2].Value, out h);
+            }
+        }
+
+        public static void WriteMergedGameUserSettingsIni(
+            string iniPath,
+            string qualityPreset,
+            int resQualityScale,
+            string resolution,
+            string windowMode,
+            int fpsLimit,
+            bool vsync)
+        {
+            int q = PresetNameToIndex(qualityPreset);
+            int w, h;
+            ParseResolution(resolution, out w, out h);
+            int fsMode = WindowModeNameToUeMode(windowMode);
+
+            StringBuilder preserved = new StringBuilder();
+            if (File.Exists(iniPath))
+            {
+                try
+                {
+                    string existing = File.ReadAllText(iniPath, Encoding.UTF8);
+                    string[] lines = existing.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                    bool skipSection = false;
+                    foreach (var rawLine in lines)
+                    {
+                        string trimmed = rawLine.Trim();
+                        if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                        {
+                            skipSection = trimmed.Equals("[ScalabilityGroups]", StringComparison.OrdinalIgnoreCase) ||
+                                          trimmed.Equals("[/Script/Engine.GameUserSettings]", StringComparison.OrdinalIgnoreCase);
+                        }
+                        if (!skipSection && trimmed.Length > 0)
+                        {
+                            preserved.AppendLine(rawLine);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            if (preserved.Length > 0)
+            {
+                sb.Append(preserved.ToString().TrimEnd());
+                sb.AppendLine();
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("[ScalabilityGroups]");
+            sb.AppendFormat("sg.ResolutionQuality={0}\r\n", resQualityScale);
+            sb.AppendFormat("sg.ViewDistanceQuality={0}\r\n", q);
+            sb.AppendFormat("sg.AntiAliasingQuality={0}\r\n", q);
+            sb.AppendFormat("sg.ShadowQuality={0}\r\n", q);
+            sb.AppendFormat("sg.GlobalIlluminationQuality={0}\r\n", q);
+            sb.AppendFormat("sg.ReflectionsQuality={0}\r\n", q);
+            sb.AppendFormat("sg.PostProcessQuality={0}\r\n", q);
+            sb.AppendFormat("sg.TextureQuality={0}\r\n", q);
+            sb.AppendFormat("sg.EffectsQuality={0}\r\n", q);
+            sb.AppendFormat("sg.FoliageQuality={0}\r\n", q);
+            sb.AppendFormat("sg.ShadingQuality={0}\r\n", q);
+            sb.AppendFormat("sg.LandscapeQuality={0}\r\n", q);
+            sb.AppendLine();
+            sb.AppendLine("[/Script/Engine.GameUserSettings]");
+            sb.AppendFormat("bUseVSync={0}\r\n", vsync ? "True" : "False");
+            sb.AppendLine("bUseDynamicResolution=False");
+            sb.AppendFormat("ResolutionSizeX={0}\r\n", w);
+            sb.AppendFormat("ResolutionSizeY={0}\r\n", h);
+            sb.AppendFormat("LastUserConfirmedResolutionSizeX={0}\r\n", w);
+            sb.AppendFormat("LastUserConfirmedResolutionSizeY={0}\r\n", h);
+            sb.AppendLine("WindowPosX=-1");
+            sb.AppendLine("WindowPosY=-1");
+            sb.AppendFormat("FullscreenMode={0}\r\n", fsMode);
+            sb.AppendFormat("LastConfirmedFullscreenMode={0}\r\n", fsMode);
+            sb.AppendFormat("PreferredFullscreenMode={0}\r\n", fsMode);
+            sb.AppendLine("Version=5");
+            sb.AppendLine("AudioQualityLevel=0");
+            sb.AppendLine("LastConfirmedAudioQualityLevel=0");
+            sb.AppendFormat("FrameRateLimit={0}.000000\r\n", fpsLimit <= 0 ? 0 : fpsLimit);
+            sb.AppendFormat("DesiredScreenWidth={0}\r\n", w);
+            sb.AppendFormat("DesiredScreenHeight={0}\r\n", h);
+            sb.AppendLine("bUseDesiredScreenHeight=True");
+            sb.AppendFormat("LastUserConfirmedDesiredScreenWidth={0}\r\n", w);
+            sb.AppendFormat("LastUserConfirmedDesiredScreenHeight={0}\r\n", h);
+
+            string parent = Path.GetDirectoryName(iniPath);
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+                Directory.CreateDirectory(parent);
+            File.WriteAllText(iniPath, sb.ToString(), Utf8NoBom);
+        }
+
+        public static string FindPackagedGameRoot(string packageDir, ref string projectName)
+        {
+            if (string.IsNullOrWhiteSpace(packageDir) || !Directory.Exists(packageDir))
+                return null;
+
+            string[] candidateSubDirs = new[]
+            {
+                packageDir,
+                Path.Combine(packageDir, "Windows"),
+                Path.Combine(packageDir, "WindowsClient"),
+                Path.Combine(packageDir, "WindowsNoEditor")
+            };
+
+            if (!string.IsNullOrWhiteSpace(projectName))
+            {
+                foreach (var sub in candidateSubDirs)
+                {
+                    if (Directory.Exists(sub) && File.Exists(Path.Combine(sub, projectName + ".exe")))
+                        return sub;
+                }
+            }
+
+            foreach (var sub in candidateSubDirs)
+            {
+                if (!Directory.Exists(sub)) continue;
+                var exes = Directory.GetFiles(sub, "*.exe", SearchOption.TopDirectoryOnly)
+                    .Where(f =>
+                    {
+                        string fn = Path.GetFileName(f);
+                        return !fn.EndsWith("_Launcher.exe", StringComparison.OrdinalIgnoreCase) &&
+                               !fn.StartsWith("UEPrereqSetup", StringComparison.OrdinalIgnoreCase) &&
+                               !fn.StartsWith("CrashReportClient", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .ToArray();
+                if (exes.Length > 0)
+                {
+                    if (string.IsNullOrWhiteSpace(projectName))
+                        projectName = Path.GetFileNameWithoutExtension(exes[0]);
+                    return sub;
+                }
+            }
+
+            return Directory.Exists(Path.Combine(packageDir, "Windows")) ? Path.Combine(packageDir, "Windows") : packageDir;
+        }
+
+        public static void ApplyDefaultSettingsToPackageOnly(
+            string packageDir,
+            string projectName,
+            string defaultPreset,
+            string defaultRes,
+            string defaultWinMode,
+            int defaultFps,
+            bool defaultVSync)
+        {
+            string proj = projectName;
+            string gameRoot = FindPackagedGameRoot(packageDir, ref proj);
+            if (string.IsNullOrEmpty(gameRoot) || string.IsNullOrEmpty(proj)) return;
+            string savedIni = Path.Combine(gameRoot, proj, @"Saved\Config\Windows\GameUserSettings.ini");
+            WriteMergedGameUserSettingsIni(savedIni, defaultPreset, 100, defaultRes, defaultWinMode, defaultFps, defaultVSync);
+        }
+
+        public static bool GenerateLauncherInPackage(
+            string packageDir,
+            string projectName,
+            string defaultPreset,
+            string defaultRes,
+            string defaultWinMode,
+            int defaultFps,
+            bool defaultVSync,
+            out string launcherExePath,
+            out string errorMessage)
+        {
+            launcherExePath = "";
+            errorMessage = "";
+
+            try
+            {
+                string proj = projectName;
+                string gameRoot = FindPackagedGameRoot(packageDir, ref proj);
+                if (string.IsNullOrEmpty(gameRoot) || !Directory.Exists(gameRoot))
+                {
+                    errorMessage = "패키징 폴더 경로를 찾을 수 없습니다: " + packageDir;
+                    return false;
+                }
+                if (string.IsNullOrWhiteSpace(proj))
+                    proj = "UEGame";
+
+                // 1. 패키징 폴더 내 기본 GameUserSettings.ini 사전 생성
+                string savedIni = Path.Combine(gameRoot, proj, @"Saved\Config\Windows\GameUserSettings.ini");
+                WriteMergedGameUserSettingsIni(savedIni, defaultPreset, 100, defaultRes, defaultWinMode, defaultFps, defaultVSync);
+
+                // 2. 런처 기본 선택값 준비
+                int presetIdx = PresetNameToIndex(defaultPreset);
+                int winModeUiIdx = 0; // 0: 테두리없는창, 1: 전체화면, 2: 창모드
+                if (string.Equals(defaultWinMode, "Fullscreen", StringComparison.OrdinalIgnoreCase)) winModeUiIdx = 1;
+                else if (string.Equals(defaultWinMode, "Windowed", StringComparison.OrdinalIgnoreCase)) winModeUiIdx = 2;
+
+                string safeProjLiteral = proj.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                string safeResLiteral = (string.IsNullOrWhiteSpace(defaultRes) ? "1920x1080" : defaultRes.Trim()).Replace("\"", "");
+
+                string launcherSource = GetLauncherSourceTemplate()
+                    .Replace("__PROJECT_NAME__", safeProjLiteral)
+                    .Replace("__DEFAULT_PRESET_IDX__", presetIdx.ToString())
+                    .Replace("__DEFAULT_RES__", safeResLiteral)
+                    .Replace("__DEFAULT_WINMODE_IDX__", winModeUiIdx.ToString())
+                    .Replace("__DEFAULT_FPS__", (defaultFps <= 0 ? 0 : defaultFps).ToString())
+                    .Replace("__DEFAULT_VSYNC__", defaultVSync ? "true" : "false");
+
+                launcherExePath = Path.Combine(gameRoot, proj + "_Launcher.exe");
+                string tempCs = Path.Combine(Path.GetTempPath(), "UELauncher_" + Guid.NewGuid().ToString("N") + ".cs");
+                try
+                {
+                    File.WriteAllText(tempCs, launcherSource, EncodingHelper.Utf8WithBom);
+                    using (var provider = new CSharpCodeProvider())
+                    {
+                        var cp = new CompilerParameters
+                        {
+                            GenerateExecutable = true,
+                            OutputAssembly = launcherExePath,
+                            GenerateInMemory = false,
+                            TreatWarningsAsErrors = false,
+                            CompilerOptions = "/target:winexe /optimize+ /codepage:65001"
+                        };
+                        cp.ReferencedAssemblies.Add("System.dll");
+                        cp.ReferencedAssemblies.Add("System.Core.dll");
+                        cp.ReferencedAssemblies.Add("System.Drawing.dll");
+                        cp.ReferencedAssemblies.Add("System.Windows.Forms.dll");
+
+                        CompilerResults cr = provider.CompileAssemblyFromFile(cp, tempCs);
+                        if (cr.Errors.HasErrors)
+                        {
+                            StringBuilder errSb = new StringBuilder();
+                            foreach (CompilerError ce in cr.Errors)
+                            {
+                                if (!ce.IsWarning)
+                                    errSb.AppendLine(string.Format("Line {0}: {1}", ce.Line, ce.ErrorText));
+                            }
+                            errorMessage = errSb.ToString().Trim();
+                            return false;
+                        }
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(tempCs))
+                    {
+                        try { File.Delete(tempCs); } catch { }
+                    }
+                }
+
+                return File.Exists(launcherExePath);
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
+        private static string GetLauncherSourceTemplate()
+        {
+            return @"using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+
+namespace UEGameLauncher
+{
+    public class LauncherForm : Form
+    {
+        private const string ProjectName = ""__PROJECT_NAME__"";
+        private ComboBox cboPreset;
+        private Label lblPresetDesc;
+        private ComboBox cboResScale;
+        private ComboBox cboResolution;
+        private ComboBox cboWindowMode;
+        private ComboBox cboFpsLimit;
+        private CheckBox chkVSync;
+
+        private readonly Color BgDark = Color.FromArgb(24, 26, 31);
+        private readonly Color BgCard = Color.FromArgb(34, 38, 46);
+        private readonly Color BgInput = Color.FromArgb(46, 51, 61);
+        private readonly Color FgText = Color.FromArgb(235, 239, 245);
+        private readonly Color FgSub = Color.FromArgb(165, 175, 190);
+        private readonly Color AccentGreen = Color.FromArgb(40, 180, 99);
+        private readonly Color AccentBlue = Color.FromArgb(56, 132, 255);
+
+        private readonly string[] PresetDescriptions = new string[]
+        {
+            ""▶ [Low 0단계] 루멘 GI·그림자·이펙트를 최소화하여 저사양/내장그래픽에서도 최고 프레임을 확보합니다."",
+            ""▶ [Medium 1단계] 발열과 GPU 부하를 낮추면서 깔끔한 화면을 유지하는 밸런스 프리셋입니다."",
+            ""▶ [High 2단계] 고품질 라이팅·그림자·반사 효과를 활성화한 고사양 권장 프리셋입니다."",
+            ""▶ [Epic 3단계] 언리얼 엔진 5 표준 최고 그래픽 프리셋 (루멘 GI·고해상도 텍스처·이펙트 전체 활성)"",
+            ""▶ [Cinematic 4단계] 실시간 플레이보다 영상 촬영·시연용 극한 품질에 맞춘 최고 부하 프리셋입니다.""
+        };
+
+        public LauncherForm()
+        {
+            this.Text = ProjectName + "" — 실행 및 그래픽 옵션 설정"";
+            this.ClientSize = new Size(480, 465);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.BackColor = BgDark;
+            this.ForeColor = FgText;
+            this.Font = new Font(""Malgun Gothic"", 9.5f, FontStyle.Regular);
+
+            BuildUI();
+            LoadLastPrefs();
+        }
+
+        private void BuildUI()
+        {
+            Panel pnlHeader = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 68,
+                BackColor = BgCard,
+                Padding = new Padding(18, 12, 18, 10)
+            };
+
+            Label lblTitle = new Label
+            {
+                Text = ""▶ "" + ProjectName + "" 실행 옵션 런처"",
+                Font = new Font(""Malgun Gothic"", 13f, FontStyle.Bold),
+                ForeColor = Color.White,
+                Location = new Point(18, 11),
+                AutoSize = true
+            };
+            Label lblSub = new Label
+            {
+                Text = ""언리얼 엔진 기본 그래픽 프리셋(Scalability) 및 해상도·창 모드를 선택하세요."",
+                Font = new Font(""Malgun Gothic"", 8.8f),
+                ForeColor = FgSub,
+                Location = new Point(20, 40),
+                AutoSize = true
+            };
+            pnlHeader.Controls.Add(lblTitle);
+            pnlHeader.Controls.Add(lblSub);
+            this.Controls.Add(pnlHeader);
+
+            int y = 84;
+
+            // 1. 그래픽 프리셋
+            AddRowLabel(""그래픽 품질 프리셋:"", y);
+            cboPreset = CreateCombo(new Point(158, y), 300);
+            cboPreset.Items.AddRange(new object[]
+            {
+                ""낮음 (Low) — 최고 프레임 / 저사양"",
+                ""중간 (Medium) — 발열 감소 / 밸런스"",
+                ""높음 (High) — 고품질 그래픽"",
+                ""에픽 (Epic) — 언리얼 권장 최고 품질"",
+                ""시네마틱 (Cinematic) — 시연·촬영용 극한 품질""
+            });
+            cboPreset.SelectedIndex = __DEFAULT_PRESET_IDX__;
+            cboPreset.SelectedIndexChanged += (s, e) => UpdatePresetDesc();
+            this.Controls.Add(cboPreset);
+            y += 31;
+
+            lblPresetDesc = new Label
+            {
+                Location = new Point(20, y),
+                Size = new Size(440, 34),
+                ForeColor = Color.FromArgb(140, 210, 255),
+                Font = new Font(""Malgun Gothic"", 8.3f)
+            };
+            this.Controls.Add(lblPresetDesc);
+            UpdatePresetDesc();
+            y += 40;
+
+            // 2. 3D 렌더링 스케일
+            AddRowLabel(""3D 렌더링 선명도:"", y);
+            cboResScale = CreateCombo(new Point(158, y), 300);
+            cboResScale.Items.AddRange(new object[]
+            {
+                ""100% (원본 해상도 선명도 - 권장)"",
+                ""85% (고프레임 업스케일)"",
+                ""75% (성능 우선)"",
+                ""50% (초저사양 모드)""
+            });
+            cboResScale.SelectedIndex = 0;
+            this.Controls.Add(cboResScale);
+            y += 38;
+
+            // 3. 화면 해상도
+            AddRowLabel(""화면 해상도:"", y);
+            cboResolution = CreateCombo(new Point(158, y), 300);
+            List<string> resItems = new List<string>
+            {
+                ""1280 x 720 (HD)"",
+                ""1600 x 900 (HD+)"",
+                ""1920 x 1080 (FHD)"",
+                ""2560 x 1440 (QHD)"",
+                ""3840 x 2160 (4K UHD)""
+            };
+            try
+            {
+                Rectangle bounds = Screen.PrimaryScreen.Bounds;
+                string nativeKey = bounds.Width + "" x "" + bounds.Height;
+                if (!resItems.Any(r => r.StartsWith(nativeKey)))
+                {
+                    resItems.Add(nativeKey + "" (현재 모니터 기본)"");
+                }
+            }
+            catch { }
+            cboResolution.Items.AddRange(resItems.ToArray());
+            SelectResolutionByText(""__DEFAULT_RES__"");
+            this.Controls.Add(cboResolution);
+            y += 38;
+
+            // 4. 화면(창) 모드
+            AddRowLabel(""화면 표시 모드:"", y);
+            cboWindowMode = CreateCombo(new Point(158, y), 300);
+            cboWindowMode.Items.AddRange(new object[]
+            {
+                ""테두리 없는 전체 창 (Windowed Fullscreen)"",
+                ""전체 화면 (Exclusive Fullscreen)"",
+                ""창 모드 (Windowed)""
+            });
+            cboWindowMode.SelectedIndex = __DEFAULT_WINMODE_IDX__;
+            this.Controls.Add(cboWindowMode);
+            y += 38;
+
+            // 5. 최대 프레임 제한
+            AddRowLabel(""최대 프레임 제한:"", y);
+            cboFpsLimit = CreateCombo(new Point(158, y), 300);
+            cboFpsLimit.Items.AddRange(new object[]
+            {
+                ""무제한 (Unlimited)"",
+                ""30 FPS"",
+                ""60 FPS"",
+                ""120 FPS"",
+                ""144 FPS""
+            });
+            SelectFpsByValue(__DEFAULT_FPS__);
+            this.Controls.Add(cboFpsLimit);
+            y += 36;
+
+            // 6. 수직동기화
+            chkVSync = new CheckBox
+            {
+                Text = ""수직동기화 (VSync 켜기 — 화면 찢어짐 방지)"",
+                Location = new Point(158, y),
+                AutoSize = true,
+                Checked = __DEFAULT_VSYNC__,
+                ForeColor = FgText
+            };
+            this.Controls.Add(chkVSync);
+            y += 38;
+
+            // 하단 실행 버튼 영역
+            Button btnLaunch = new Button
+            {
+                Text = ""▶ 선택한 옵션으로 게임 시작"",
+                Location = new Point(18, y),
+                Size = new Size(276, 46),
+                BackColor = AccentGreen,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(""Malgun Gothic"", 11f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnLaunch.FlatAppearance.BorderSize = 0;
+            btnLaunch.Click += (s, e) => ApplyAndLaunch(true);
+
+            Button btnSaveOnly = new Button
+            {
+                Text = ""설정만 저장"",
+                Location = new Point(302, y),
+                Size = new Size(88, 46),
+                BackColor = AccentBlue,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(""Malgun Gothic"", 9f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            btnSaveOnly.FlatAppearance.BorderSize = 0;
+            btnSaveOnly.Click += (s, e) => ApplyAndLaunch(false);
+
+            Button btnClose = new Button
+            {
+                Text = ""닫기"",
+                Location = new Point(396, y),
+                Size = new Size(64, 46),
+                BackColor = BgCard,
+                ForeColor = FgSub,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(70, 78, 92);
+            btnClose.Click += (s, e) => this.Close();
+
+            this.Controls.Add(btnLaunch);
+            this.Controls.Add(btnSaveOnly);
+            this.Controls.Add(btnClose);
+        }
+
+        private void AddRowLabel(string text, int y)
+        {
+            Label lbl = new Label
+            {
+                Text = text,
+                Location = new Point(18, y + 4),
+                AutoSize = true,
+                ForeColor = FgSub,
+                Font = new Font(""Malgun Gothic"", 9.2f, FontStyle.Bold)
+            };
+            this.Controls.Add(lbl);
+        }
+
+        private ComboBox CreateCombo(Point loc, int width)
+        {
+            return new ComboBox
+            {
+                Location = loc,
+                Width = width,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+        }
+
+        private void UpdatePresetDesc()
+        {
+            int idx = cboPreset.SelectedIndex;
+            if (idx >= 0 && idx < PresetDescriptions.Length && lblPresetDesc != null)
+                lblPresetDesc.Text = PresetDescriptions[idx];
+        }
+
+        private void SelectResolutionByText(string res)
+        {
+            var m = Regex.Match(res ?? """", @""(\d{3,5})\s*[xX]\s*(\d{3,5})"");
+            if (m.Success)
+            {
+                string prefix = m.Groups[1].Value + "" x "" + m.Groups[2].Value;
+                for (int i = 0; i < cboResolution.Items.Count; i++)
+                {
+                    if (cboResolution.Items[i].ToString().StartsWith(prefix))
+                    {
+                        cboResolution.SelectedIndex = i;
+                        return;
+                    }
+                }
+            }
+            if (cboResolution.Items.Count > 2) cboResolution.SelectedIndex = 2;
+        }
+
+        private void SelectFpsByValue(int fps)
+        {
+            if (fps == 30) cboFpsLimit.SelectedIndex = 1;
+            else if (fps == 60) cboFpsLimit.SelectedIndex = 2;
+            else if (fps == 120) cboFpsLimit.SelectedIndex = 3;
+            else if (fps == 144) cboFpsLimit.SelectedIndex = 4;
+            else cboFpsLimit.SelectedIndex = 0;
+        }
+
+        private string GetPrefsFilePath()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ""launcher_prefs.cfg"");
+        }
+
+        private void LoadLastPrefs()
+        {
+            try
+            {
+                string p = GetPrefsFilePath();
+                if (!File.Exists(p)) return;
+                foreach (var line in File.ReadAllLines(p, Encoding.UTF8))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    string k = line.Substring(0, eq).Trim();
+                    string v = line.Substring(eq + 1).Trim();
+                    int iv;
+                    if (k == ""Preset"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboPreset.Items.Count)
+                        cboPreset.SelectedIndex = iv;
+                    else if (k == ""ResScale"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboResScale.Items.Count)
+                        cboResScale.SelectedIndex = iv;
+                    else if (k == ""Resolution"")
+                        SelectResolutionByText(v);
+                    else if (k == ""WinMode"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboWindowMode.Items.Count)
+                        cboWindowMode.SelectedIndex = iv;
+                    else if (k == ""FpsIdx"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboFpsLimit.Items.Count)
+                        cboFpsLimit.SelectedIndex = iv;
+                    else if (k == ""VSync"")
+                        chkVSync.Checked = v.Equals(""true"", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch { }
+        }
+
+        private void SaveLastPrefs(string resKey)
+        {
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine(""Preset="" + cboPreset.SelectedIndex);
+                sb.AppendLine(""ResScale="" + cboResScale.SelectedIndex);
+                sb.AppendLine(""Resolution="" + resKey);
+                sb.AppendLine(""WinMode="" + cboWindowMode.SelectedIndex);
+                sb.AppendLine(""FpsIdx="" + cboFpsLimit.SelectedIndex);
+                sb.AppendLine(""VSync="" + (chkVSync.Checked ? ""true"" : ""false""));
+                File.WriteAllText(GetPrefsFilePath(), sb.ToString(), new UTF8Encoding(false));
+            }
+            catch { }
+        }
+
+        private void ApplyAndLaunch(bool launchGame)
+        {
+            int q = cboPreset.SelectedIndex >= 0 ? cboPreset.SelectedIndex : 3;
+            int resScale = 100;
+            if (cboResScale.SelectedIndex == 1) resScale = 85;
+            else if (cboResScale.SelectedIndex == 2) resScale = 75;
+            else if (cboResScale.SelectedIndex == 3) resScale = 50;
+
+            int w = 1920, h = 1080;
+            var m = Regex.Match(cboResolution.Text ?? """", @""(\d{3,5})\s*x\s*(\d{3,5})"");
+            if (m.Success)
+            {
+                int.TryParse(m.Groups[1].Value, out w);
+                int.TryParse(m.Groups[2].Value, out h);
+            }
+
+            // UI: 0=WindowedFullscreen(UE:1), 1=Fullscreen(UE:0), 2=Windowed(UE:2)
+            int ueFullscreenMode = 1;
+            if (cboWindowMode.SelectedIndex == 1) ueFullscreenMode = 0;
+            else if (cboWindowMode.SelectedIndex == 2) ueFullscreenMode = 2;
+
+            int fps = 0;
+            if (cboFpsLimit.SelectedIndex == 1) fps = 30;
+            else if (cboFpsLimit.SelectedIndex == 2) fps = 60;
+            else if (cboFpsLimit.SelectedIndex == 3) fps = 120;
+            else if (cboFpsLimit.SelectedIndex == 4) fps = 144;
+
+            bool vsync = chkVSync.Checked;
+            SaveLastPrefs(w + ""x"" + h);
+
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            string[] targetInis = new string[]
+            {
+                Path.Combine(baseDir, ProjectName, @""Saved\Config\Windows\GameUserSettings.ini""),
+                Path.Combine(localAppData, ProjectName, @""Saved\Config\Windows\GameUserSettings.ini"")
+            };
+
+            foreach (var iniPath in targetInis)
+            {
+                try { WriteUe5Ini(iniPath, q, resScale, w, h, ueFullscreenMode, fps, vsync); }
+                catch { }
+            }
+
+            if (!launchGame)
+            {
+                MessageBox.Show(
+                    ""선택한 그래픽 프리셋 및 디스플레이 설정이 저장되었습니다!\n이제 "" + ProjectName + "".exe 를 직접 실행하셔도 이 옵션으로 시작됩니다."",
+                    ""설정 저장 완료"", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string gameExe = FindGameExecutable(baseDir);
+            if (string.IsNullOrEmpty(gameExe) || !File.Exists(gameExe))
+            {
+                MessageBox.Show(
+                    ""실행할 게임 파일("" + ProjectName + "".exe)을 같은 폴더에서 찾을 수 없습니다.\n현재 폴더: "" + baseDir,
+                    ""실행 파일 없음"", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            List<string> args = new List<string>();
+            args.Add(""-ResX="" + w);
+            args.Add(""-ResY="" + h);
+            if (ueFullscreenMode == 0) args.Add(""-FULLSCREEN"");
+            else if (ueFullscreenMode == 2) args.Add(""-WINDOWED"");
+            args.Add(vsync ? ""-VSync"" : ""-NoVSync"");
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(gameExe, string.Join("" "", args.ToArray()))
+                {
+                    WorkingDirectory = Path.GetDirectoryName(gameExe),
+                    UseShellExecute = true
+                });
+                this.Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(""게임 실행 실패: "" + ex.Message, ""오류"", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private string FindGameExecutable(string baseDir)
+        {
+            string exact = Path.Combine(baseDir, ProjectName + "".exe"");
+            if (File.Exists(exact)) return exact;
+
+            string selfPath = Application.ExecutablePath;
+            var candidates = Directory.GetFiles(baseDir, ""*.exe"", SearchOption.TopDirectoryOnly)
+                .Where(f => !string.Equals(f, selfPath, StringComparison.OrdinalIgnoreCase) &&
+                            !Path.GetFileName(f).StartsWith(""UEPrereqSetup"", StringComparison.OrdinalIgnoreCase) &&
+                            !Path.GetFileName(f).StartsWith(""CrashReportClient"", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            return candidates.Length > 0 ? candidates[0] : null;
+        }
+
+        private void WriteUe5Ini(string iniPath, int q, int resScale, int w, int h, int fsMode, int fps, bool vsync)
+        {
+            StringBuilder preserved = new StringBuilder();
+            if (File.Exists(iniPath))
+            {
+                string[] lines = File.ReadAllText(iniPath, Encoding.UTF8).Split(new[] { ""\r\n"", ""\n"" }, StringSplitOptions.None);
+                bool skip = false;
+                foreach (var raw in lines)
+                {
+                    string t = raw.Trim();
+                    if (t.StartsWith(""["") && t.EndsWith(""]""))
+                    {
+                        skip = t.Equals(""[ScalabilityGroups]"", StringComparison.OrdinalIgnoreCase) ||
+                               t.Equals(""[/Script/Engine.GameUserSettings]"", StringComparison.OrdinalIgnoreCase);
+                    }
+                    if (!skip && t.Length > 0) preserved.AppendLine(raw);
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            if (preserved.Length > 0)
+            {
+                sb.Append(preserved.ToString().TrimEnd());
+                sb.AppendLine();
+                sb.AppendLine();
+            }
+
+            sb.AppendLine(""[ScalabilityGroups]"");
+            sb.AppendFormat(""sg.ResolutionQuality={0}\r\n"", resScale);
+            sb.AppendFormat(""sg.ViewDistanceQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.AntiAliasingQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.ShadowQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.GlobalIlluminationQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.ReflectionsQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.PostProcessQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.TextureQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.EffectsQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.FoliageQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.ShadingQuality={0}\r\n"", q);
+            sb.AppendFormat(""sg.LandscapeQuality={0}\r\n"", q);
+            sb.AppendLine();
+            sb.AppendLine(""[/Script/Engine.GameUserSettings]"");
+            sb.AppendFormat(""bUseVSync={0}\r\n"", vsync ? ""True"" : ""False"");
+            sb.AppendLine(""bUseDynamicResolution=False"");
+            sb.AppendFormat(""ResolutionSizeX={0}\r\n"", w);
+            sb.AppendFormat(""ResolutionSizeY={0}\r\n"", h);
+            sb.AppendFormat(""LastUserConfirmedResolutionSizeX={0}\r\n"", w);
+            sb.AppendFormat(""LastUserConfirmedResolutionSizeY={0}\r\n"", h);
+            sb.AppendLine(""WindowPosX=-1"");
+            sb.AppendLine(""WindowPosY=-1"");
+            sb.AppendFormat(""FullscreenMode={0}\r\n"", fsMode);
+            sb.AppendFormat(""LastConfirmedFullscreenMode={0}\r\n"", fsMode);
+            sb.AppendFormat(""PreferredFullscreenMode={0}\r\n"", fsMode);
+            sb.AppendLine(""Version=5"");
+            sb.AppendLine(""AudioQualityLevel=0"");
+            sb.AppendLine(""LastConfirmedAudioQualityLevel=0"");
+            sb.AppendFormat(""FrameRateLimit={0}.000000\r\n"", fps <= 0 ? 0 : fps);
+            sb.AppendFormat(""DesiredScreenWidth={0}\r\n"", w);
+            sb.AppendFormat(""DesiredScreenHeight={0}\r\n"", h);
+            sb.AppendLine(""bUseDesiredScreenHeight=True"");
+            sb.AppendFormat(""LastUserConfirmedDesiredScreenWidth={0}\r\n"", w);
+            sb.AppendFormat(""LastUserConfirmedDesiredScreenHeight={0}\r\n"", h);
+
+            string parent = Path.GetDirectoryName(iniPath);
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+                Directory.CreateDirectory(parent);
+            File.WriteAllText(iniPath, sb.ToString(), new UTF8Encoding(false));
+        }
+    }
+
+    static class LauncherProgram
+    {
+        [DllImport(""user32.dll"")]
+        private static extern bool SetProcessDPIAware();
+
         [STAThread]
         static void Main()
         {
+            try { SetProcessDPIAware(); } catch { }
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new LauncherForm());
+        }
+    }
+}";
+        }
+    }
+
+    static class Program
+    {
+        [STAThread]
+        static void Main(string[] args)
+        {
+            if (args != null && args.Length >= 2 && args[0] == "--make-launcher")
+            {
+                string pkgDir = args[1];
+                string projName = args.Length >= 3 ? args[2] : "";
+                string preset = args.Length >= 4 ? args[3] : "Epic";
+                string res = args.Length >= 5 ? args[4] : "1920x1080";
+                string winMode = args.Length >= 6 ? args[5] : "WindowedFullscreen";
+                string outPath, err;
+                bool ok = GameLauncherBuilder.GenerateLauncherInPackage(pkgDir, projName, preset, res, winMode, 0, true, out outPath, out err);
+                Environment.Exit(ok ? 0 : 1);
+                return;
+            }
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());

@@ -197,6 +197,19 @@ $ExitCode = $LASTEXITCODE
 $Elapsed = (Get-Date) - $StartTime
 $Duration = "{0:D2}분 {1:D2}초" -f [int]$Elapsed.TotalMinutes, $Elapsed.Seconds
 
+if ($BuildMode -eq "FullPackage" -and $ExitCode -eq 0 -and $PackageOutDir -and (Test-Path $PackageOutDir)) {
+    $MgrExe = Join-Path $ScriptDir "UE_BuildManager.exe"
+    if (Test-Path $MgrExe) {
+        $DefPreset = if ($Cfg -and $Cfg.DefaultQualityPreset) { $Cfg.DefaultQualityPreset } else { "Epic" }
+        $DefRes    = if ($Cfg -and $Cfg.DefaultResolution)    { $Cfg.DefaultResolution }    else { "1920x1080" }
+        $DefWin    = if ($Cfg -and $Cfg.DefaultWindowMode)    { $Cfg.DefaultWindowMode }    else { "WindowedFullscreen" }
+        $GenLnch   = if ($Cfg -and ($null -ne $Cfg.GenerateLauncherOnPackage)) { [bool]$Cfg.GenerateLauncherOnPackage } else { $true }
+        if ($GenLnch) {
+            & $MgrExe --make-launcher $PackageOutDir $ProjectName $DefPreset $DefRes $DefWin | Out-Null
+        }
+    }
+}
+
 # ==============================================================================
 # 7. 언리얼 엔진 내부 상세 로그(Saved/Logs 및 Engine UAT 로그) 전수 복사 보관
 # ==============================================================================
