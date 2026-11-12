@@ -20,8 +20,8 @@ using Microsoft.CSharp;
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.7.0")]
-[assembly: AssemblyFileVersion("1.0.7.0")]
+[assembly: AssemblyVersion("1.0.8.0")]
+[assembly: AssemblyFileVersion("1.0.8.0")]
 
 namespace BuildServerKit
 {
@@ -536,14 +536,18 @@ namespace BuildServerKit
         private Label lblTimer;
         private Button btnHeaderReset;
 
-        // UI Controls - Left Panel (Controls)
+        // UI Controls - Left Panel & Tabs
         private Label lblConnectedRepo;
         private Button btnConnectGitHub;
         private ComboBox cboBranch;
+        private Label lblLeftWfBadge;
+        private Label lblPkgSummaryBadge;
         private ComboBox cboClientConfig;
         private ComboBox cboQualityPreset;
         private ComboBox cboResolution;
         private ComboBox cboWindowMode;
+        private ComboBox cboDefaultFps;
+        private CheckBox chkDefaultVSync;
         private CheckBox chkGenerateLauncher;
         private Button btnCreateLauncherManual;
         private Button btnRefreshBranches;
@@ -578,6 +582,11 @@ namespace BuildServerKit
 
         // Main Tabs
         private TabControl tabMain;
+        private TabPage tabConsolePage;
+        private TabPage tabPackageOptsPage;
+        private TabPage tabSetupPage;
+        private TabPage tabHistoryPage;
+        private TabPage tabSettingsPage;
         private RichTextBox rtbConsole;
         private RichTextBox rtbErrorsOnly;
         private SplitContainer splitConsole;
@@ -763,9 +772,14 @@ namespace BuildServerKit
                     config.DefaultResolution = cboResolution.Text.Trim();
                 if (cboWindowMode != null)
                     config.DefaultWindowMode = GetSelectedWindowModeName();
+                if (cboDefaultFps != null)
+                    config.DefaultFrameRateLimit = GetSelectedDefaultFps();
+                if (chkDefaultVSync != null)
+                    config.DefaultVSync = chkDefaultVSync.Checked;
                 if (chkGenerateLauncher != null)
                     config.GenerateLauncherOnPackage = chkGenerateLauncher.Checked;
                 config.AutoSendSlack = chkAutoSlack.Checked;
+                RefreshPackageSummaryBadge();
             }
             try
             {
@@ -831,8 +845,13 @@ namespace BuildServerKit
                 cboResolution.SelectedIndex = 2;
             if (cboWindowMode != null && cboWindowMode.Items.Count > 0)
                 cboWindowMode.SelectedIndex = 0;
+            if (cboDefaultFps != null && cboDefaultFps.Items.Count > 0)
+                cboDefaultFps.SelectedIndex = 0;
+            if (chkDefaultVSync != null)
+                chkDefaultVSync.Checked = true;
             if (chkGenerateLauncher != null)
                 chkGenerateLauncher.Checked = true;
+            RefreshPackageSummaryBadge();
 
             rtbConsole.Clear();
             rtbErrorsOnly.Clear();
@@ -879,7 +898,7 @@ namespace BuildServerKit
 
             lblCommitInfo = new Label
             {
-                Text = "연결된 저장소 없음 — 좌측 [0. GitHub 로그인 & 저장소 연결]을 눌러 시작하세요.",
+                Text = "연결된 저장소 없음 — 좌측 [▶ GitHub 저장소 연결 / 변경]을 눌러 시작하세요.",
                 AutoSize = true,
                 ForeColor = FgSub,
                 Font = new Font("Malgun Gothic", 9.5f, FontStyle.Regular),
@@ -905,48 +924,45 @@ namespace BuildServerKit
             pnlTop.Controls.Add(lblTimer);
             pnlTop.Controls.Add(btnHeaderReset);
 
-            // Left Control Sidebar
+            // Left Control Sidebar (Clean, Zero-Clutter Quick Launch Dashboard)
             Panel pnlLeft = new Panel
             {
                 Dock = DockStyle.Left,
-                Width = 382,
-                BackColor = BgPanel,
+                Width = 358,
+                BackColor = Color.FromArgb(20, 22, 27),
                 Padding = new Padding(12),
                 AutoScroll = true
             };
 
-            int y = 8;
+            int y = 10;
+            int cardW = 332;
 
-            // --- Section 0: GitHub Login & Repo Connection ---
-            Label sec0 = CreateSectionHeader("■ 0. GitHub 로그인 & 저장소 연결", ref y);
-            pnlLeft.Controls.Add(sec0);
+            // --- Card 1: Repository & Branch ---
+            Panel cardRepo = CreateCardPanel("■ 1. 연결 저장소 & 브랜치", new Point(12, y), new Size(cardW, 198));
+            int cy = 34;
 
             lblConnectedRepo = new Label
             {
                 Text = "○ 연결된 저장소: 없음 (연결 필요)",
-                Location = new Point(14, y),
-                Size = new Size(346, 22),
+                Location = new Point(12, cy),
+                Size = new Size(cardW - 24, 20),
                 ForeColor = Color.FromArgb(255, 205, 86),
-                Font = new Font("Malgun Gothic", 9f, FontStyle.Bold)
+                Font = new Font("Malgun Gothic", 8.8f, FontStyle.Bold)
             };
-            pnlLeft.Controls.Add(lblConnectedRepo);
-            y += 24;
+            cardRepo.Controls.Add(lblConnectedRepo);
+            cy += 23;
 
-            btnConnectGitHub = CreateFlatButton("▶ GitHub 로그인 & 사용할 저장소 선택하기", new Point(14, y), new Size(346, 38), AccentPurple);
-            btnConnectGitHub.Font = new Font("Malgun Gothic", 9.5f, FontStyle.Bold);
+            btnConnectGitHub = CreateFlatButton("▶ GitHub 저장소 연결 / 변경", new Point(12, cy), new Size(cardW - 24, 34), AccentPurple);
+            btnConnectGitHub.Font = new Font("Malgun Gothic", 9.2f, FontStyle.Bold);
             btnConnectGitHub.Click += (s, e) => OpenGitHubConnectDialog();
-            pnlLeft.Controls.Add(btnConnectGitHub);
-            y += 46;
+            cardRepo.Controls.Add(btnConnectGitHub);
+            cy += 42;
 
-            // --- Section 1: Build & Package ---
-            Label sec1 = CreateSectionHeader("■ 1. 수동 빌드 & 패키징 원클릭 실행", ref y);
-            pnlLeft.Controls.Add(sec1);
-
-            Label lblBr = new Label { Text = "대상 브랜치:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
+            Label lblBr = new Label { Text = "브랜치:", Location = new Point(12, cy + 4), AutoSize = true, ForeColor = FgSub };
             cboBranch = new ComboBox
             {
-                Location = new Point(98, y),
-                Width = 156,
+                Location = new Point(66, cy),
+                Width = 178,
                 BackColor = BgInput,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -958,281 +974,127 @@ namespace BuildServerKit
                 UpdateCommitBanner();
             };
 
-            btnRefreshBranches = CreateFlatButton("↻ 목록 갱신", new Point(260, y - 1), new Size(100, 27), BgInput);
+            btnRefreshBranches = CreateFlatButton("↻ 갱신", new Point(250, cy - 1), new Size(70, 27), BgInput);
             btnRefreshBranches.Click += (s, e) => FetchBranchList();
 
-            pnlLeft.Controls.Add(lblBr);
-            pnlLeft.Controls.Add(cboBranch);
-            pnlLeft.Controls.Add(btnRefreshBranches);
-            y += 30;
+            cardRepo.Controls.Add(lblBr);
+            cardRepo.Controls.Add(cboBranch);
+            cardRepo.Controls.Add(btnRefreshBranches);
+            cy += 30;
 
-            lblWorkflowStatus = new Label
+            lblLeftWfBadge = new Label
             {
-                Text = "○ 브랜치 워크플로우(build.yml): 저장소 연결 후 자동 확인",
-                Location = new Point(14, y),
-                Size = new Size(346, 20),
+                Text = "○ 워크플로우 상태: [3] 탭에서 스캔/등록 가능",
+                Location = new Point(12, cy),
+                Size = new Size(cardW - 24, 19),
                 ForeColor = FgSub,
-                Font = new Font("Malgun Gothic", 8.5f, FontStyle.Bold)
+                Font = new Font("Malgun Gothic", 8.2f, FontStyle.Regular),
+                Cursor = Cursors.Hand
             };
-            pnlLeft.Controls.Add(lblWorkflowStatus);
-            y += 22;
+            lblLeftWfBadge.Click += (s, e) => { if (tabSetupPage != null) tabMain.SelectedTab = tabSetupPage; };
+            cardRepo.Controls.Add(lblLeftWfBadge);
+            cy += 22;
 
-            btnScanWorkflows = CreateFlatButton("▶ 모든 브랜치 build.yml 유무 & Actions 감지 스캔", new Point(14, y), new Size(346, 29), Color.FromArgb(48, 72, 98));
-            btnScanWorkflows.Click += async (s, e) => await ScanAllBranchesForWorkflowAsync(true);
-            pnlLeft.Controls.Add(btnScanWorkflows);
-            y += 33;
-
-            btnPushWorkflow = CreateFlatButton("★ 선택한 브랜치에 build.yml 원클릭 자동 커밋(Push)", new Point(14, y), new Size(346, 29), AccentPurple);
-            btnPushWorkflow.Click += async (s, e) => await PushWorkflowToSelectedBranchAsync();
-            pnlLeft.Controls.Add(btnPushWorkflow);
-            y += 33;
-
-            btnGitSync = CreateFlatButton("▼ 선택한 브랜치 최신 커밋 가져오기 (Git Sync)", new Point(14, y), new Size(346, 31), Color.FromArgb(60, 68, 82));
+            btnGitSync = CreateFlatButton("▼ 선택 브랜치 최신 커밋 동기화 (Git Sync)", new Point(12, cy), new Size(cardW - 24, 33), Color.FromArgb(54, 62, 76));
             btnGitSync.Click += async (s, e) => await RunGitSyncAsync(cboBranch.Text.Trim());
-            pnlLeft.Controls.Add(btnGitSync);
-            y += 35;
+            cardRepo.Controls.Add(btnGitSync);
 
-            Label lblCfg = new Label { Text = "패키징 구성:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
-            cboClientConfig = new ComboBox
+            pnlLeft.Controls.Add(cardRepo);
+            y += cardRepo.Height + 12;
+
+            // --- Card 2: One-Click Build & Package ---
+            Panel cardBuild = CreateCardPanel("■ 2. 원클릭 빌드 & 패키징 실행", new Point(12, y), new Size(cardW, 212));
+            cy = 34;
+
+            Panel pnlOptSummary = new Panel
             {
-                Location = new Point(98, y),
-                Width = 262,
-                BackColor = BgInput,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                DropDownStyle = ComboBoxStyle.DropDownList
+                Location = new Point(12, cy),
+                Size = new Size(cardW - 24, 32),
+                BackColor = Color.FromArgb(24, 28, 36)
             };
-            cboClientConfig.Items.AddRange(new object[]
+            lblPkgSummaryBadge = new Label
             {
-                "Development (디버그/콘솔 포함 - 기본)",
-                "Shipping (최종 배포/최적화)",
-                "DebugGame (C++ 심층 디버깅)"
-            });
-            if (string.Equals(config.ClientConfig, "Shipping", StringComparison.OrdinalIgnoreCase))
-                cboClientConfig.SelectedIndex = 1;
-            else if (string.Equals(config.ClientConfig, "DebugGame", StringComparison.OrdinalIgnoreCase))
-                cboClientConfig.SelectedIndex = 2;
-            else
-                cboClientConfig.SelectedIndex = 0;
-            cboClientConfig.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
-            pnlLeft.Controls.Add(lblCfg);
-            pnlLeft.Controls.Add(cboClientConfig);
-            y += 30;
-
-            Label lblPreset = new Label { Text = "그래픽 기본:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
-            cboQualityPreset = new ComboBox
-            {
-                Location = new Point(98, y),
-                Width = 262,
-                BackColor = BgInput,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                DropDownStyle = ComboBoxStyle.DropDownList
+                Text = "옵션: Development · Epic · 1920x1080",
+                Location = new Point(8, 7),
+                Size = new Size(210, 18),
+                ForeColor = Color.FromArgb(145, 225, 175),
+                Font = new Font("Malgun Gothic", 8.3f, FontStyle.Bold)
             };
-            cboQualityPreset.Items.AddRange(new object[]
-            {
-                "Low (낮음 - 저사양/최고 프레임)",
-                "Medium (중간 - 밸런스 옵션)",
-                "High (높음 - 고품질 라이팅)",
-                "Epic (에픽 - 언리얼 기본 프리셋)",
-                "Cinematic (시네마틱 - 시연용 최고품질)"
-            });
-            cboQualityPreset.SelectedIndex = GameLauncherBuilder.PresetNameToIndex(config.DefaultQualityPreset);
-            cboQualityPreset.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
-            pnlLeft.Controls.Add(lblPreset);
-            pnlLeft.Controls.Add(cboQualityPreset);
-            y += 30;
+            Button btnGoPkgOpts = CreateFlatButton("옵션 변경 →", new Point(cardW - 112, 3), new Size(84, 26), Color.FromArgb(52, 60, 76));
+            btnGoPkgOpts.Font = new Font("Malgun Gothic", 8.2f, FontStyle.Bold);
+            btnGoPkgOpts.Click += (s, e) => { if (tabPackageOptsPage != null) tabMain.SelectedTab = tabPackageOptsPage; };
+            pnlOptSummary.Controls.Add(lblPkgSummaryBadge);
+            pnlOptSummary.Controls.Add(btnGoPkgOpts);
+            cardBuild.Controls.Add(pnlOptSummary);
+            cy += 40;
 
-            Label lblRes = new Label { Text = "기본 해상도:", Location = new Point(14, y + 4), AutoSize = true, ForeColor = FgSub };
-            cboResolution = new ComboBox
-            {
-                Location = new Point(98, y),
-                Width = 132,
-                BackColor = BgInput,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            string[] stdRes = new[] { "1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160" };
-            cboResolution.Items.AddRange(stdRes);
-            int resIdx = Array.IndexOf(stdRes, config.DefaultResolution);
-            cboResolution.SelectedIndex = resIdx >= 0 ? resIdx : 2;
-            cboResolution.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
-
-            cboWindowMode = new ComboBox
-            {
-                Location = new Point(236, y),
-                Width = 124,
-                BackColor = BgInput,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cboWindowMode.Items.AddRange(new object[]
-            {
-                "테두리없는창",
-                "전체화면",
-                "창모드"
-            });
-            if (string.Equals(config.DefaultWindowMode, "Fullscreen", StringComparison.OrdinalIgnoreCase))
-                cboWindowMode.SelectedIndex = 1;
-            else if (string.Equals(config.DefaultWindowMode, "Windowed", StringComparison.OrdinalIgnoreCase))
-                cboWindowMode.SelectedIndex = 2;
-            else
-                cboWindowMode.SelectedIndex = 0;
-            cboWindowMode.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
-
-            pnlLeft.Controls.Add(lblRes);
-            pnlLeft.Controls.Add(cboResolution);
-            pnlLeft.Controls.Add(cboWindowMode);
-            y += 28;
-
-            chkGenerateLauncher = new CheckBox
-            {
-                Text = "패키징 시 '게임 옵션 선택 런처.exe' 자동 동봉",
-                Location = new Point(14, y),
-                AutoSize = true,
-                Checked = config.GenerateLauncherOnPackage,
-                ForeColor = Color.FromArgb(145, 225, 175)
-            };
-            chkGenerateLauncher.CheckedChanged += (s, e) => SaveConfigFromUI();
-            pnlLeft.Controls.Add(chkGenerateLauncher);
-            y += 26;
-
-            btnQuickVerify = CreateFlatButton("▶ 빠른 검증 빌드 (C++ 컴파일 + 증분 쿠킹)", new Point(14, y), new Size(346, 40), AccentGreen);
-            btnQuickVerify.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
+            btnQuickVerify = CreateFlatButton("▶ 빠른 검증 빌드 (컴파일 + 증분 쿠킹)", new Point(12, cy), new Size(cardW - 24, 42), AccentGreen);
+            btnQuickVerify.Font = new Font("Malgun Gothic", 9.8f, FontStyle.Bold);
             btnQuickVerify.Click += (s, e) => StartUEBuild("QuickVerify", cboBranch.Text.Trim());
-            pnlLeft.Controls.Add(btnQuickVerify);
-            y += 45;
+            cardBuild.Controls.Add(btnQuickVerify);
+            cy += 48;
 
-            btnFullPackage = CreateFlatButton("★ 전체 패키징 빌드 (.pak 압축 + 아카이브)", new Point(14, y), new Size(346, 40), AccentBlue);
-            btnFullPackage.Font = new Font("Malgun Gothic", 10f, FontStyle.Bold);
+            btnFullPackage = CreateFlatButton("★ 전체 패키징 빌드 (.pak + 런처 동봉)", new Point(12, cy), new Size(cardW - 24, 42), AccentBlue);
+            btnFullPackage.Font = new Font("Malgun Gothic", 9.8f, FontStyle.Bold);
             btnFullPackage.Click += (s, e) => StartUEBuild("FullPackage", cboBranch.Text.Trim());
-            pnlLeft.Controls.Add(btnFullPackage);
-            y += 44;
+            cardBuild.Controls.Add(btnFullPackage);
+            cy += 48;
 
-            btnCreateLauncherManual = CreateFlatButton("★ 기존 패키징 폴더에 '게임 옵션 런처.exe' 즉시 생성", new Point(14, y), new Size(346, 29), AccentPurple);
-            btnCreateLauncherManual.Click += (s, e) => CreateLauncherInExistingFolderDialog();
-            pnlLeft.Controls.Add(btnCreateLauncherManual);
-            y += 33;
-
-            btnStopBuild = CreateFlatButton("■ 진행 중인 빌드 강제 중단", new Point(14, y), new Size(346, 30), AccentRed);
+            btnStopBuild = CreateFlatButton("■ 진행 중인 빌드 강제 중단", new Point(12, cy), new Size(cardW - 24, 28), AccentRed);
             btnStopBuild.Enabled = false;
             btnStopBuild.Click += (s, e) => StopActiveBuild();
-            pnlLeft.Controls.Add(btnStopBuild);
-            y += 38;
+            cardBuild.Controls.Add(btnStopBuild);
 
-            // --- Section 2: GitHub Actions Self-Hosted Runner Control ---
-            Label sec2 = CreateSectionHeader("■ 2. GitHub Actions Runner 원클릭 제어", ref y);
-            pnlLeft.Controls.Add(sec2);
+            pnlLeft.Controls.Add(cardBuild);
+            y += cardBuild.Height + 12;
 
-            chkAutoSlack = new CheckBox
-            {
-                Text = "빌드 완료/에러 발생 시 Slack으로 로그 자동 전송",
-                Location = new Point(14, y),
-                AutoSize = true,
-                Checked = config.AutoSendSlack,
-                ForeColor = FgText
-            };
-            chkAutoSlack.CheckedChanged += (s, e) => SaveConfigFromUI();
-            pnlLeft.Controls.Add(chkAutoSlack);
-            y += 24;
+            // --- Card 3: Auto-Watch Builder & Slack ---
+            Panel cardAuto = CreateCardPanel("■ 3. 무인 자동 감지 빌더 & 알림", new Point(12, y), new Size(cardW, 132));
+            cy = 34;
 
             lblRunnerStatus = new Label
             {
-                Text = "● Runner 상태: 확인 중...",
-                Location = new Point(14, y),
-                Size = new Size(346, 22),
+                Text = "● 상태: 확인 중...",
+                Location = new Point(12, cy),
+                Size = new Size(cardW - 24, 20),
                 ForeColor = Color.FromArgb(255, 205, 86),
-                Font = new Font("Malgun Gothic", 9f, FontStyle.Bold)
+                Font = new Font("Malgun Gothic", 8.8f, FontStyle.Bold)
             };
-            pnlLeft.Controls.Add(lblRunnerStatus);
-            y += 24;
+            cardAuto.Controls.Add(lblRunnerStatus);
+            cy += 24;
 
-            btnToggleApiPoller = CreateFlatButton("★ [추천] API 자동 감지 빌더 가동 (방장권한/Runner 불필요)", new Point(14, y), new Size(346, 36), AccentGreen);
-            btnToggleApiPoller.Font = new Font("Malgun Gothic", 9f, FontStyle.Bold);
+            btnToggleApiPoller = CreateFlatButton("★ API 자동 감지 빌더 가동 (방장권한 불필요)", new Point(12, cy), new Size(cardW - 24, 38), AccentGreen);
+            btnToggleApiPoller.Font = new Font("Malgun Gothic", 9.2f, FontStyle.Bold);
             btnToggleApiPoller.Click += (s, e) => ToggleApiAutoPoller();
-            pnlLeft.Controls.Add(btnToggleApiPoller);
-            y += 40;
+            cardAuto.Controls.Add(btnToggleApiPoller);
+            cy += 44;
 
-            btnDownloadRunner = CreateFlatButton("[1] GitHub Runner 자동 다운로드 & 설치 (선택)", new Point(14, y), new Size(346, 31), BgInput);
-            btnDownloadRunner.Click += async (s, e) => await DownloadAndExtractRunnerAsync();
-            pnlLeft.Controls.Add(btnDownloadRunner);
-            y += 35;
-
-            btnRegisterRunner = CreateFlatButton("[2] 연결된 저장소에 이 PC를 Runner로 자동 등록", new Point(14, y), new Size(346, 31), AccentPurple);
-            btnRegisterRunner.Click += async (s, e) => await RegisterGitHubRunnerAsync();
-            pnlLeft.Controls.Add(btnRegisterRunner);
-            y += 35;
-
-            btnStartRunner = CreateFlatButton("▶ Runner 가동 시작", new Point(14, y), new Size(169, 34), AccentGreen);
-            btnStartRunner.Font = new Font("Malgun Gothic", 9.5f, FontStyle.Bold);
-            btnStartRunner.Click += (s, e) => StartGitHubRunnerAgent();
-
-            btnStopRunner = CreateFlatButton("■ Runner 중지", new Point(191, y), new Size(169, 34), AccentRed);
-            btnStopRunner.Enabled = false;
-            btnStopRunner.Click += (s, e) => StopGitHubRunnerAgent();
-
-            pnlLeft.Controls.Add(btnStartRunner);
-            pnlLeft.Controls.Add(btnStopRunner);
-            y += 38;
-
-            btnOpenGHActionsWeb = CreateFlatButton("→ 연결된 저장소의 GitHub Actions 웹 열기", new Point(14, y), new Size(346, 30), Color.FromArgb(50, 58, 72));
-            btnOpenGHActionsWeb.Click += (s, e) =>
+            chkAutoSlack = new CheckBox
             {
-                if (string.IsNullOrWhiteSpace(config.GitHubRepoUrl))
-                {
-                    MessageBox.Show("먼저 [GitHub 로그인 & 사용할 저장소 선택하기]로 저장소를 연결해 주세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                Process.Start(config.GitHubRepoUrl + "/actions");
+                Text = "빌드 완료/에러 시 Slack 채널로 자동 리포트",
+                Location = new Point(14, cy),
+                AutoSize = true,
+                Checked = config.AutoSendSlack,
+                ForeColor = FgText,
+                Font = new Font("Malgun Gothic", 8.8f)
             };
-            pnlLeft.Controls.Add(btnOpenGHActionsWeb);
-            y += 38;
+            chkAutoSlack.CheckedChanged += (s, e) => SaveConfigFromUI();
+            cardAuto.Controls.Add(chkAutoSlack);
 
-            // --- Section 3: One-Click Setup & Asset Links ---
-            Label sec3 = CreateSectionHeader("■ 3. 전용 PC 초기 세팅 & 제외 에셋 연결", ref y);
-            pnlLeft.Controls.Add(sec3);
+            pnlLeft.Controls.Add(cardAuto);
+            y += cardAuto.Height + 12;
 
-            btnInitFolders = CreateFlatButton("[1] 필수 폴더 구조(BuildSystem/Archive) 생성", new Point(14, y), new Size(346, 31), BgInput);
-            btnInitFolders.Click += (s, e) => InitDirectories();
-            pnlLeft.Controls.Add(btnInitFolders);
-            y += 35;
-
-            btnCloneRepo = CreateFlatButton("[2] 연결된 저장소를 워크스페이스에 최초 Clone", new Point(14, y), new Size(346, 31), BgInput);
-            btnCloneRepo.Click += async (s, e) => await CloneRepositoryAsync();
-            pnlLeft.Controls.Add(btnCloneRepo);
-            y += 35;
-
-            btnLinkAssets = CreateFlatButton("[3] .gitignore 제외 에셋 자동 스캔 & 심볼릭 링크 연결", new Point(14, y), new Size(346, 31), AccentOrange);
-            btnLinkAssets.Click += (s, e) => EnsureAssetJunctions(true);
-            pnlLeft.Controls.Add(btnLinkAssets);
-            y += 34;
-
-            lblAssetStatus = new Label
-            {
-                Text = "○ 에셋 링크 상태: 저장소 연결 후 확인 가능",
-                Location = new Point(14, y),
-                Size = new Size(346, 22),
-                ForeColor = FgSub,
-                Font = new Font("Malgun Gothic", 8.5f, FontStyle.Bold)
-            };
-            pnlLeft.Controls.Add(lblAssetStatus);
-            y += 24;
-
-            Button btnOpenLogs = CreateFlatButton("로그 보관함 폴더 열기", new Point(14, y), new Size(169, 30), BgInput);
+            // --- Card 4: Quick Archive Folders ---
+            Button btnOpenLogs = CreateFlatButton("로그 보관함 열기", new Point(12, y), new Size(162, 34), BgPanel);
             btnOpenLogs.Click += (s, e) => OpenFolderSafe(Path.Combine(config.ArchiveRoot, "Logs"));
-            Button btnOpenPkgs = CreateFlatButton("패키징 결과물 폴더 열기", new Point(191, y), new Size(169, 30), BgInput);
+            Button btnOpenPkgs = CreateFlatButton("패키징 폴더 열기", new Point(182, y), new Size(162, 34), BgPanel);
             btnOpenPkgs.Click += (s, e) => OpenFolderSafe(Path.Combine(config.ArchiveRoot, "Packages"));
             pnlLeft.Controls.Add(btnOpenLogs);
             pnlLeft.Controls.Add(btnOpenPkgs);
-            y += 34;
 
-            Button btnOpenShared = CreateFlatButton("제외 에셋 원본(SharedAssets) 폴더 열기", new Point(14, y), new Size(346, 30), BgInput);
-            btnOpenShared.Click += (s, e) => OpenFolderSafe(config.SharedAssetsDir);
-            pnlLeft.Controls.Add(btnOpenShared);
-
-            // Right Main Content Area (Tabs)
+            // =================================================================
+            // Right Main Content Area (5 Organized Tabs)
+            // =================================================================
             tabMain = new TabControl
             {
                 Dock = DockStyle.Fill,
@@ -1240,7 +1102,7 @@ namespace BuildServerKit
             };
 
             // Tab 1: Live Console & Error Extractor
-            TabPage tabConsole = new TabPage("[1] 실시간 빌드 로그 & 에러 분석")
+            tabConsolePage = new TabPage("[1] 실시간 빌드 로그")
             {
                 BackColor = BgDark,
                 Padding = new Padding(8)
@@ -1306,7 +1168,7 @@ namespace BuildServerKit
             };
             Label lblErrTitle = new Label
             {
-                Text = " [!] 핵심 에러 / 경고 발췌 뷰어 (C++ 컴파일 에러, 쿠킹 에러, Ensure 자동 필터링)",
+                Text = " [!] 핵심 에러 / 경고 발췌 뷰어 (C++ 컴파일 에러, 쿠킹 에러, 플러그인 누락 자동 필터링)",
                 AutoSize = true,
                 ForeColor = Color.FromArgb(255, 150, 150),
                 Font = new Font("Malgun Gothic", 9f, FontStyle.Bold),
@@ -1329,11 +1191,29 @@ namespace BuildServerKit
             splitConsole.Panel2.Controls.Add(rtbErrorsOnly);
             splitConsole.Panel2.Controls.Add(pnlErrorHeader);
 
-            tabConsole.Controls.Add(splitConsole);
-            tabConsole.Controls.Add(pnlConsoleToolbar);
+            tabConsolePage.Controls.Add(splitConsole);
+            tabConsolePage.Controls.Add(pnlConsoleToolbar);
 
-            // Tab 2: Build Log History
-            TabPage tabHistory = new TabPage("[2] 저장된 빌드 로그 히스토리")
+            // Tab 2: Packaging & Game Launch Options
+            tabPackageOptsPage = new TabPage("[2] 패키징 & 게임 옵션")
+            {
+                BackColor = BgDark,
+                Padding = new Padding(16),
+                AutoScroll = true
+            };
+            BuildPackageOptionsTab(tabPackageOptsPage);
+
+            // Tab 3: Branch Workflow & Initial PC Setup
+            tabSetupPage = new TabPage("[3] 워크플로우 & 초기 세팅")
+            {
+                BackColor = BgDark,
+                Padding = new Padding(16),
+                AutoScroll = true
+            };
+            BuildWorkflowAndSetupTab(tabSetupPage);
+
+            // Tab 4: Build Log History
+            tabHistoryPage = new TabPage("[4] 빌드 히스토리")
             {
                 BackColor = BgDark,
                 Padding = new Padding(8)
@@ -1375,26 +1255,29 @@ namespace BuildServerKit
             lvHistory.Columns.Add("전체 경로", 340);
             lvHistory.DoubleClick += (s, e) => OpenSelectedHistoryLog(false);
 
-            tabHistory.Controls.Add(lvHistory);
-            tabHistory.Controls.Add(pnlHistTop);
+            tabHistoryPage.Controls.Add(lvHistory);
+            tabHistoryPage.Controls.Add(pnlHistTop);
 
-            // Tab 3: Settings & GitHub Actions / Slack Config
-            TabPage tabSettings = new TabPage("[3] 경로 & GitHub Actions / Slack 설정")
+            // Tab 5: Settings & GitHub / Slack Tokens
+            tabSettingsPage = new TabPage("[5] 경로 & 토큰 설정")
             {
                 BackColor = BgDark,
                 Padding = new Padding(16),
                 AutoScroll = true
             };
+            BuildSettingsTab(tabSettingsPage);
 
-            BuildSettingsTab(tabSettings);
-
-            tabMain.TabPages.Add(tabConsole);
-            tabMain.TabPages.Add(tabHistory);
-            tabMain.TabPages.Add(tabSettings);
+            tabMain.TabPages.Add(tabConsolePage);
+            tabMain.TabPages.Add(tabPackageOptsPage);
+            tabMain.TabPages.Add(tabSetupPage);
+            tabMain.TabPages.Add(tabHistoryPage);
+            tabMain.TabPages.Add(tabSettingsPage);
 
             this.Controls.Add(tabMain);
             this.Controls.Add(pnlLeft);
             this.Controls.Add(pnlTop);
+
+            RefreshPackageSummaryBadge();
 
             uiDurationTimer = new Timer { Interval = 1000 };
             uiDurationTimer.Tick += (s, e) =>
@@ -1407,9 +1290,360 @@ namespace BuildServerKit
             };
 
             AppendConsole("=== Unreal Engine 전용 빌드 & GitHub Actions 자동 배포 매니저 ===", Color.Cyan);
-            AppendConsole("1. 좌측 상단 [GitHub 로그인 & 사용할 저장소 선택하기] 버튼을 눌러 계정을 연동하고 대상 저장소를 선택하세요.", FgSub);
-            AppendConsole("2. [2. GitHub Actions Runner 원클릭 제어]에서 Runner 다운로드 및 자동 등록을 클릭 한 번으로 진행할 수 있습니다.", FgSub);
-            AppendConsole("3. 다른 PC로 이 프로그램을 배포하기 전에는 우측 상단 [초기화] 버튼을 눌러 잔여 데이터를 모두 비울 수 있습니다.\n", FgSub);
+            AppendConsole("1. 좌측 [1. 연결 저장소 & 브랜치]에서 저장소를 선택하고, [3. 무인 자동 감지 빌더]를 가동하면 모든 Push가 자동 빌드됩니다.", FgSub);
+            AppendConsole("2. 패키징 구성(Development/Shipping), 그래픽 프리셋, 해상도 및 런처 동봉 설정은 상단 [[2] 패키징 & 게임 옵션] 탭에서 조정할 수 있습니다.", FgSub);
+            AppendConsole("3. 최초 폴더 생성, Clone, .gitignore 에셋 연결, build.yml 등록은 상단 [[3] 워크플로우 & 초기 세팅] 탭에 깔끔하게 모아두었습니다.\n", FgSub);
+        }
+
+        private Panel CreateCardPanel(string title, Point loc, Size size)
+        {
+            Panel card = new Panel
+            {
+                Location = loc,
+                Size = size,
+                BackColor = BgPanel,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            Label lbl = new Label
+            {
+                Text = title,
+                Location = new Point(12, 9),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(130, 195, 255),
+                Font = new Font("Malgun Gothic", 9.6f, FontStyle.Bold)
+            };
+            card.Controls.Add(lbl);
+            return card;
+        }
+
+        private void RefreshPackageSummaryBadge()
+        {
+            if (lblPkgSummaryBadge == null) return;
+            string cfg = GetSelectedClientConfig();
+            string preset = GetSelectedQualityPresetName();
+            string res = (cboResolution != null && !string.IsNullOrWhiteSpace(cboResolution.Text)) ? cboResolution.Text.Trim() : config.DefaultResolution;
+            string lnch = (chkGenerateLauncher == null || chkGenerateLauncher.Checked) ? "런처ON" : "런처OFF";
+            lblPkgSummaryBadge.Text = string.Format("{0} · {1} · {2} · {3}", cfg, preset, res, lnch);
+        }
+
+        private void BuildPackageOptionsTab(TabPage page)
+        {
+            int y = 14;
+            int cardW = 860;
+
+            // Card 1: Packaging Configuration
+            Panel cardCfg = CreateCardPanel("■ 1. 언리얼 패키징 빌드 구성 (Client Build Configuration)", new Point(16, y), new Size(cardW, 118));
+            Label lblCfg = new Label { Text = "패키징 구성 선택:", Location = new Point(18, 44), AutoSize = true, ForeColor = FgSub };
+            cboClientConfig = new ComboBox
+            {
+                Location = new Point(195, 40),
+                Width = 380,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboClientConfig.Items.AddRange(new object[]
+            {
+                "Development (개발/콘솔 명령어/로그 포함 — 기본 권장)",
+                "Shipping (최종 배포/외부 제출용 — 디버그 제거 및 최대 최적화)",
+                "DebugGame (C++ 심층 디버깅 전용)"
+            });
+            if (string.Equals(config.ClientConfig, "Shipping", StringComparison.OrdinalIgnoreCase))
+                cboClientConfig.SelectedIndex = 1;
+            else if (string.Equals(config.ClientConfig, "DebugGame", StringComparison.OrdinalIgnoreCase))
+                cboClientConfig.SelectedIndex = 2;
+            else
+                cboClientConfig.SelectedIndex = 0;
+
+            Label lblCfgHint = new Label
+            {
+                Location = new Point(195, 76),
+                Size = new Size(640, 28),
+                ForeColor = Color.FromArgb(145, 210, 255),
+                Font = new Font("Malgun Gothic", 8.8f)
+            };
+            Action updateCfgHint = () =>
+            {
+                if (cboClientConfig.SelectedIndex == 1)
+                    lblCfgHint.Text = "▶ Shipping: 콘솔 키(~)와 Print String이 비활성화되고 실행 성능과 용량이 최대 최적화됩니다.";
+                else if (cboClientConfig.SelectedIndex == 2)
+                    lblCfgHint.Text = "▶ DebugGame: 엔진은 최적화 상태로 두고 프로젝트 C++ 모듈만 디버그 심볼을 유지합니다.";
+                else
+                    lblCfgHint.Text = "▶ Development: 콘솔 명령어(~), 디버그 출력, 상세 크래시 로그가 활성화되어 팀 테스트에 가장 적합합니다.";
+            };
+            updateCfgHint();
+            cboClientConfig.SelectedIndexChanged += (s, e) => { updateCfgHint(); SaveConfigFromUI(); };
+
+            cardCfg.Controls.AddRange(new Control[] { lblCfg, cboClientConfig, lblCfgHint });
+            page.Controls.Add(cardCfg);
+            y += cardCfg.Height + 16;
+
+            // Card 2: Default Graphics & Display Preset
+            Panel cardGfx = CreateCardPanel("■ 2. 패키징 기본 그래픽 프리셋 & 디스플레이 설정 (DefaultGameUserSettings)", new Point(16, y), new Size(cardW, 252));
+            Label lblGfxSub = new Label
+            {
+                Text = "전체 패키징(.pak) 시 아래 기본값이 게임에 구워지며, 동봉되는 런처의 초기 선택값으로도 설정됩니다.",
+                Location = new Point(18, 36),
+                AutoSize = true,
+                ForeColor = FgSub,
+                Font = new Font("Malgun Gothic", 8.8f)
+            };
+            cardGfx.Controls.Add(lblGfxSub);
+
+            int gy = 68;
+            Label lblPreset = new Label { Text = "언리얼 그래픽 프리셋:", Location = new Point(18, gy + 4), AutoSize = true, ForeColor = FgSub };
+            cboQualityPreset = new ComboBox
+            {
+                Location = new Point(195, gy),
+                Width = 380,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboQualityPreset.Items.AddRange(new object[]
+            {
+                "Low (낮음 — 최고 프레임 / 내장·저사양 PC)",
+                "Medium (중간 — 발열 감소 / 밸런스 옵션)",
+                "High (높음 — 고품질 라이팅 & 그림자)",
+                "Epic (에픽 — 언리얼 엔진 기본 최고 품질)",
+                "Cinematic (시네마틱 — 영상 촬영·시연용 극한 품질)"
+            });
+            cboQualityPreset.SelectedIndex = GameLauncherBuilder.PresetNameToIndex(config.DefaultQualityPreset);
+            cboQualityPreset.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+            cardGfx.Controls.AddRange(new Control[] { lblPreset, cboQualityPreset });
+            gy += 38;
+
+            Label lblRes = new Label { Text = "기본 화면 해상도:", Location = new Point(18, gy + 4), AutoSize = true, ForeColor = FgSub };
+            cboResolution = new ComboBox
+            {
+                Location = new Point(195, gy),
+                Width = 210,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            string[] stdRes = new[] { "1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160" };
+            cboResolution.Items.AddRange(stdRes);
+            int resIdx = Array.IndexOf(stdRes, config.DefaultResolution);
+            cboResolution.SelectedIndex = resIdx >= 0 ? resIdx : 2;
+            cboResolution.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+
+            Label lblWinMode = new Label { Text = "화면 표시 모드:", Location = new Point(430, gy + 4), AutoSize = true, ForeColor = FgSub };
+            cboWindowMode = new ComboBox
+            {
+                Location = new Point(545, gy),
+                Width = 280,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboWindowMode.Items.AddRange(new object[]
+            {
+                "테두리 없는 전체 창 (Windowed Fullscreen)",
+                "전체 화면 (Exclusive Fullscreen)",
+                "창 모드 (Windowed)"
+            });
+            if (string.Equals(config.DefaultWindowMode, "Fullscreen", StringComparison.OrdinalIgnoreCase))
+                cboWindowMode.SelectedIndex = 1;
+            else if (string.Equals(config.DefaultWindowMode, "Windowed", StringComparison.OrdinalIgnoreCase))
+                cboWindowMode.SelectedIndex = 2;
+            else
+                cboWindowMode.SelectedIndex = 0;
+            cboWindowMode.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+
+            cardGfx.Controls.AddRange(new Control[] { lblRes, cboResolution, lblWinMode, cboWindowMode });
+            gy += 38;
+
+            Label lblFps = new Label { Text = "기본 최대 프레임 제한:", Location = new Point(18, gy + 4), AutoSize = true, ForeColor = FgSub };
+            cboDefaultFps = new ComboBox
+            {
+                Location = new Point(195, gy),
+                Width = 210,
+                BackColor = BgInput,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                DropDownStyle = ComboBoxStyle.DropDownList
+            };
+            cboDefaultFps.Items.AddRange(new object[]
+            {
+                "무제한 (Unlimited)",
+                "30 FPS",
+                "60 FPS",
+                "120 FPS",
+                "144 FPS"
+            });
+            if (config.DefaultFrameRateLimit == 30) cboDefaultFps.SelectedIndex = 1;
+            else if (config.DefaultFrameRateLimit == 60) cboDefaultFps.SelectedIndex = 2;
+            else if (config.DefaultFrameRateLimit == 120) cboDefaultFps.SelectedIndex = 3;
+            else if (config.DefaultFrameRateLimit == 144) cboDefaultFps.SelectedIndex = 4;
+            else cboDefaultFps.SelectedIndex = 0;
+            cboDefaultFps.SelectedIndexChanged += (s, e) => SaveConfigFromUI();
+
+            chkDefaultVSync = new CheckBox
+            {
+                Text = "수직동기화 (VSync) 기본 활성화",
+                Location = new Point(432, gy + 2),
+                AutoSize = true,
+                Checked = config.DefaultVSync,
+                ForeColor = FgText
+            };
+            chkDefaultVSync.CheckedChanged += (s, e) => SaveConfigFromUI();
+
+            cardGfx.Controls.AddRange(new Control[] { lblFps, cboDefaultFps, chkDefaultVSync });
+            gy += 42;
+
+            Label lblPresetExplain = new Label
+            {
+                Text = "* 언리얼 Scalability 11개 그래픽 항목(루멘 GI, 리플렉션, 그림자, 안티앨리어싱, 텍스처, 이펙트, 식생 등)이 선택한 프리셋 단계로 자동 설정됩니다.",
+                Location = new Point(18, gy),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(145, 225, 175),
+                Font = new Font("Malgun Gothic", 8.6f)
+            };
+            cardGfx.Controls.Add(lblPresetExplain);
+
+            page.Controls.Add(cardGfx);
+            y += cardGfx.Height + 16;
+
+            // Card 3: Game Option Launcher Auto-Generator
+            Panel cardLnch = CreateCardPanel("■ 3. 게임 실행 옵션 런처 ({프로젝트명}_Launcher.exe) 동봉 & 즉시 생성 도구", new Point(16, y), new Size(cardW, 156));
+
+            chkGenerateLauncher = new CheckBox
+            {
+                Text = "전체 패키징 완료 시 결과물 폴더에 '게임 실행 옵션 선택 런처.exe' 자동 동봉 (권장)",
+                Location = new Point(18, 40),
+                AutoSize = true,
+                Checked = config.GenerateLauncherOnPackage,
+                ForeColor = Color.FromArgb(145, 225, 175),
+                Font = new Font("Malgun Gothic", 9.6f, FontStyle.Bold)
+            };
+            chkGenerateLauncher.CheckedChanged += (s, e) => SaveConfigFromUI();
+
+            Label lblLnchDesc = new Label
+            {
+                Text = "게임을 켤 때 그래픽 프리셋(낮음~시네마틱), 3D 렌더링 선명도, 해상도, 창 모드, FPS 제한을 고르고 실행할 수 있는 독립 런처를 동봉합니다.",
+                Location = new Point(38, 68),
+                AutoSize = true,
+                ForeColor = FgSub,
+                Font = new Font("Malgun Gothic", 8.8f)
+            };
+
+            btnCreateLauncherManual = CreateFlatButton("★ 이미 뽑아둔 기존 패키징 폴더에 '게임 옵션 런처.exe' 지금 바로 생성하기", new Point(18, 100), new Size(540, 38), AccentPurple);
+            btnCreateLauncherManual.Font = new Font("Malgun Gothic", 9.5f, FontStyle.Bold);
+            btnCreateLauncherManual.Click += (s, e) => CreateLauncherInExistingFolderDialog();
+
+            Button btnOpenPkgDirFromTab = CreateFlatButton("패키징 결과물 보관함 열기", new Point(570, 100), new Size(260, 38), BgInput);
+            btnOpenPkgDirFromTab.Click += (s, e) => OpenFolderSafe(Path.Combine(config.ArchiveRoot, "Packages"));
+
+            cardLnch.Controls.AddRange(new Control[] { chkGenerateLauncher, lblLnchDesc, btnCreateLauncherManual, btnOpenPkgDirFromTab });
+            page.Controls.Add(cardLnch);
+        }
+
+        private void BuildWorkflowAndSetupTab(TabPage page)
+        {
+            int y = 14;
+            int cardW = 860;
+
+            // Card 1: Initial PC Setup & Asset Junctions
+            Panel cardSetup = CreateCardPanel("■ 1. 전용 빌드 PC 초기 폴더 구축 & .gitignore 제외 에셋 심볼릭 링크 연결", new Point(16, y), new Size(cardW, 152));
+
+            lblAssetStatus = new Label
+            {
+                Text = "○ 에셋 링크 상태: 저장소 연결 후 확인 가능",
+                Location = new Point(18, 38),
+                Size = new Size(cardW - 36, 22),
+                ForeColor = FgSub,
+                Font = new Font("Malgun Gothic", 9.2f, FontStyle.Bold)
+            };
+            cardSetup.Controls.Add(lblAssetStatus);
+
+            btnInitFolders = CreateFlatButton("[1] 필수 폴더 구조(BuildSystem/Archive) 생성", new Point(18, 68), new Size(268, 36), BgInput);
+            btnInitFolders.Click += (s, e) => InitDirectories();
+
+            btnCloneRepo = CreateFlatButton("[2] 연결된 저장소를 워크스페이스에 최초 Clone", new Point(296, 68), new Size(276, 36), BgInput);
+            btnCloneRepo.Click += async (s, e) => await CloneRepositoryAsync();
+
+            btnLinkAssets = CreateFlatButton("[3] .gitignore 제외 에셋 심볼릭 링크 연결", new Point(582, 68), new Size(258, 36), AccentOrange);
+            btnLinkAssets.Font = new Font("Malgun Gothic", 9f, FontStyle.Bold);
+            btnLinkAssets.Click += (s, e) => EnsureAssetJunctions(true);
+
+            Button btnOpenShared = CreateFlatButton("제외 에셋 원본(SharedAssets) 폴더 열기", new Point(18, 110), new Size(268, 30), BgInput);
+            btnOpenShared.Click += (s, e) => OpenFolderSafe(config.SharedAssetsDir);
+
+            Button btnOpenWorkspace = CreateFlatButton("워크스페이스 프로젝트 폴더 열기", new Point(296, 110), new Size(276, 30), BgInput);
+            btnOpenWorkspace.Click += (s, e) => OpenFolderSafe(string.IsNullOrWhiteSpace(config.ProjectDir) ? config.WorkspaceRoot : config.ProjectDir);
+
+            cardSetup.Controls.AddRange(new Control[] { btnInitFolders, btnCloneRepo, btnLinkAssets, btnOpenShared, btnOpenWorkspace });
+            page.Controls.Add(cardSetup);
+            y += cardSetup.Height + 16;
+
+            // Card 2: Branch Workflow (build.yml) Scanner & Auto-Push
+            Panel cardWf = CreateCardPanel("■ 2. 브랜치별 GitHub Actions 워크플로우 (.github/workflows/build.yml) 관리", new Point(16, y), new Size(cardW, 138));
+
+            lblWorkflowStatus = new Label
+            {
+                Text = "○ 브랜치 워크플로우(build.yml): 저장소 연결 후 자동 확인",
+                Location = new Point(18, 38),
+                Size = new Size(cardW - 36, 22),
+                ForeColor = FgSub,
+                Font = new Font("Malgun Gothic", 9.2f, FontStyle.Bold)
+            };
+            cardWf.Controls.Add(lblWorkflowStatus);
+
+            btnScanWorkflows = CreateFlatButton("▶ 모든 원격 브랜치 build.yml 유무 & Actions 감지 스캔", new Point(18, 72), new Size(305, 40), Color.FromArgb(48, 72, 98));
+            btnScanWorkflows.Click += async (s, e) => await ScanAllBranchesForWorkflowAsync(true);
+
+            btnPushWorkflow = CreateFlatButton("★ 현재 선택된 브랜치에 build.yml 원클릭 자동 커밋(Push)", new Point(333, 72), new Size(325, 40), AccentPurple);
+            btnPushWorkflow.Font = new Font("Malgun Gothic", 9f, FontStyle.Bold);
+            btnPushWorkflow.Click += async (s, e) => await PushWorkflowToSelectedBranchAsync();
+
+            btnOpenGHActionsWeb = CreateFlatButton("→ GitHub Actions 웹 열기", new Point(668, 72), new Size(172, 40), BgInput);
+            btnOpenGHActionsWeb.Click += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(config.GitHubRepoUrl))
+                {
+                    MessageBox.Show("먼저 좌측 [GitHub 저장소 연결 / 변경]으로 저장소를 연결해 주세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                Process.Start(config.GitHubRepoUrl + "/actions");
+            };
+
+            cardWf.Controls.AddRange(new Control[] { btnScanWorkflows, btnPushWorkflow, btnOpenGHActionsWeb });
+            page.Controls.Add(cardWf);
+            y += cardWf.Height + 16;
+
+            // Card 3: Optional Official GitHub Self-Hosted Runner
+            Panel cardRunner = CreateCardPanel("■ 3. 공식 GitHub Self-Hosted Runner 설치 및 제어 (저장소 방장/Owner 전용 · 선택 기능)", new Point(16, y), new Size(cardW, 132));
+            Label lblRunnerNote = new Label
+            {
+                Text = "* 일반 팀원(Collaborator) 권한에서는 좌측 [★ API 자동 감지 빌더 가동]만 켜두시면 충분하므로 아래 Runner는 설치하지 않으셔도 됩니다.",
+                Location = new Point(18, 38),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(145, 210, 255),
+                Font = new Font("Malgun Gothic", 8.8f)
+            };
+            cardRunner.Controls.Add(lblRunnerNote);
+
+            btnDownloadRunner = CreateFlatButton("[1] Runner 다운로드 & 설치", new Point(18, 72), new Size(215, 38), BgInput);
+            btnDownloadRunner.Click += async (s, e) => await DownloadAndExtractRunnerAsync();
+
+            btnRegisterRunner = CreateFlatButton("[2] 이 PC를 공식 Runner로 등록", new Point(243, 72), new Size(235, 38), AccentPurple);
+            btnRegisterRunner.Click += async (s, e) => await RegisterGitHubRunnerAsync();
+
+            btnStartRunner = CreateFlatButton("▶ Runner 가동 시작", new Point(488, 72), new Size(170, 38), AccentGreen);
+            btnStartRunner.Font = new Font("Malgun Gothic", 9.2f, FontStyle.Bold);
+            btnStartRunner.Click += (s, e) => StartGitHubRunnerAgent();
+
+            btnStopRunner = CreateFlatButton("■ Runner 중지", new Point(668, 72), new Size(172, 38), AccentRed);
+            btnStopRunner.Enabled = false;
+            btnStopRunner.Click += (s, e) => StopGitHubRunnerAgent();
+
+            cardRunner.Controls.AddRange(new Control[] { btnDownloadRunner, btnRegisterRunner, btnStartRunner, btnStopRunner });
+            page.Controls.Add(cardRunner);
         }
 
         private void BuildSettingsTab(TabPage page)
@@ -1619,6 +1853,11 @@ namespace BuildServerKit
                     lblWorkflowStatus.Text = "○ 브랜치 워크플로우(build.yml): 저장소 연결 후 자동 확인";
                     lblWorkflowStatus.ForeColor = FgSub;
                 }
+                if (lblLeftWfBadge != null)
+                {
+                    lblLeftWfBadge.Text = "○ 워크플로우: 저장소 연결 필요 ([3] 탭)";
+                    lblLeftWfBadge.ForeColor = FgSub;
+                }
             }
         }
 
@@ -1662,11 +1901,21 @@ namespace BuildServerKit
             {
                 lblWorkflowStatus.Text = "○ 브랜치 워크플로우(build.yml): 저장소/브랜치 선택 필요";
                 lblWorkflowStatus.ForeColor = FgSub;
+                if (lblLeftWfBadge != null)
+                {
+                    lblLeftWfBadge.Text = "○ 워크플로우: 저장소/브랜치 선택 필요";
+                    lblLeftWfBadge.ForeColor = FgSub;
+                }
                 return;
             }
 
             lblWorkflowStatus.Text = string.Format("● '{0}' 브랜치의 build.yml 확인 중...", branch);
             lblWorkflowStatus.ForeColor = Color.FromArgb(255, 205, 86);
+            if (lblLeftWfBadge != null)
+            {
+                lblLeftWfBadge.Text = string.Format("● [{0}] build.yml 확인 중...", branch);
+                lblLeftWfBadge.ForeColor = Color.FromArgb(255, 205, 86);
+            }
 
             await Task.Run(() =>
             {
@@ -1728,11 +1977,21 @@ namespace BuildServerKit
                     {
                         lblWorkflowStatus.Text = string.Format("● [{0}] 워크플로우 감지됨: {1}{2}", branch, string.Join(", ", foundYmls), runInfo);
                         lblWorkflowStatus.ForeColor = AccentGreen;
+                        if (lblLeftWfBadge != null)
+                        {
+                            lblLeftWfBadge.Text = string.Format("● [{0}] {1} 감지됨", branch, string.Join(", ", foundYmls));
+                            lblLeftWfBadge.ForeColor = AccentGreen;
+                        }
                     }
                     else
                     {
                         lblWorkflowStatus.Text = string.Format("✖ [{0}] 브랜치에 build.yml 없음 (아래 버튼으로 스캔/등록)", branch);
                         lblWorkflowStatus.ForeColor = AccentOrange;
+                        if (lblLeftWfBadge != null)
+                        {
+                            lblLeftWfBadge.Text = string.Format("✖ [{0}] build.yml 없음 (클릭해 [3]탭 등록)", branch);
+                            lblLeftWfBadge.ForeColor = AccentOrange;
+                        }
                     }
                 }));
             });
@@ -1857,7 +2116,7 @@ namespace BuildServerKit
                     : "✖ 아직 어떤 브랜치에서도 .github/workflows/build.yml 파일이 감지되지 않았습니다.\n([★ 선택한 브랜치에 build.yml 원클릭 자동 커밋] 버튼으로 즉시 추가할 수 있습니다.)\n\n";
 
                 MessageBox.Show(summaryHeader + report.ToString() +
-                    "\n[참고] 특정 브랜치에 build.yml을 커밋/Push했을 때 이 PC에서 자동으로 빌드가 돌게 하려면 좌측 [2. GitHub Actions Runner 원클릭 제어]에서 반드시 [▶ Runner 가동 시작]이 켜져 있어야 합니다!",
+                    "\n[참고] 특정 브랜치에 커밋/Push했을 때 이 PC에서 자동으로 빌드가 돌게 하려면 좌측 [3. 무인 자동 감지 빌더]에서 [★ API 자동 감지 빌더 가동]을 켜두세요!",
                     "브랜치별 build.yml 및 GitHub Actions 감지 결과", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
@@ -1939,7 +2198,7 @@ namespace BuildServerKit
                         CheckSelectedBranchWorkflowAsync(branch);
                         MessageBox.Show(
                             string.Format("'{0}' 브랜치에 .github/workflows/build.yml 등록이 완료되었습니다!\n\n" +
-                                          "이제 좌측 [▶ Runner 가동 시작] 버튼이 켜져 있으면 해당 브랜치의 빌드가 이 PC에서 자동으로 시작됩니다.", branch),
+                                          "이제 좌측 [★ API 자동 감지 빌더 가동]이 켜져 있으면 해당 브랜치의 빌드가 이 PC에서 자동으로 시작됩니다.", branch),
                             "build.yml 원클릭 등록 완료", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }));
                 }
@@ -2096,7 +2355,7 @@ namespace BuildServerKit
                     {
                         this.BeginInvoke(new Action(() =>
                         {
-                            lblCommitInfo.Text = "연결된 저장소 없음 — 좌측 [GitHub 로그인 & 사용할 저장소 선택하기]를 눌러 시작하세요.";
+                            lblCommitInfo.Text = "연결된 저장소 없음 — 좌측 [▶ GitHub 저장소 연결 / 변경]을 눌러 시작하세요.";
                         }));
                         return;
                     }
@@ -2297,7 +2556,7 @@ namespace BuildServerKit
             {
                 isApiPolling = false;
                 if (apiPollTimer != null) apiPollTimer.Stop();
-                btnToggleApiPoller.Text = "★ [추천] API 자동 감지 빌더 가동 (방장권한/Runner 불필요)";
+                btnToggleApiPoller.Text = "★ API 자동 감지 빌더 가동 (방장권한 불필요)";
                 btnToggleApiPoller.BackColor = AccentGreen;
                 AppendConsole("■ [API 자동 감지 빌더] 감시가 중지되었습니다.", AccentOrange);
                 UpdateRunnerStatusUI();
@@ -2308,15 +2567,15 @@ namespace BuildServerKit
             {
                 MessageBox.Show(
                     "API 자동 감지 빌더를 가동하려면 먼저 GitHub API 토큰(ghp_...)과 저장소가 연결되어 있어야 합니다!\n\n" +
-                    "• 방법 1: 좌측 상단 [▶ GitHub 로그인 & 사용할 저장소 선택하기]에서 토큰 입력 후 저장소 선택\n" +
-                    "• 방법 2: 우측 [[3] 경로 & GitHub Actions / Slack 설정] 탭에서 'GitHub API 토큰 (ghp_...)' 입력 후 [✔ 2. 입력한 API 토큰으로 저장소/브랜치 즉시 연동] 클릭",
+                    "• 방법 1: 좌측 상단 [▶ GitHub 저장소 연결 / 변경]에서 토큰 입력 후 저장소 선택\n" +
+                    "• 방법 2: 상단 [[5] 경로 & 토큰 설정] 탭에서 'GitHub API 토큰 (ghp_...)' 입력 후 [✔ 2. 입력한 API 토큰으로 저장소/브랜치 즉시 연동] 클릭",
                     "GitHub API 토큰 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                tabMain.SelectedIndex = 2;
+                if (tabSettingsPage != null) tabMain.SelectedTab = tabSettingsPage;
                 return;
             }
 
             isApiPolling = true;
-            btnToggleApiPoller.Text = "■ API 자동 감지 빌더 중지 (현재 15초 주기로 감시 중)";
+            btnToggleApiPoller.Text = "■ API 자동 감지 빌더 중지 (15초 감시 중)";
             btnToggleApiPoller.BackColor = AccentRed;
             UpdateRunnerStatusUI();
 
@@ -2519,7 +2778,7 @@ namespace BuildServerKit
                 }
                 else
                 {
-                    tabMain.SelectedIndex = 2;
+                    if (tabSettingsPage != null) tabMain.SelectedTab = tabSettingsPage;
                 }
                 return;
             }
@@ -2932,6 +3191,19 @@ namespace BuildServerKit
             return string.IsNullOrWhiteSpace(config.DefaultWindowMode) ? "WindowedFullscreen" : config.DefaultWindowMode;
         }
 
+        private int GetSelectedDefaultFps()
+        {
+            if (cboDefaultFps != null)
+            {
+                if (cboDefaultFps.SelectedIndex == 1) return 30;
+                if (cboDefaultFps.SelectedIndex == 2) return 60;
+                if (cboDefaultFps.SelectedIndex == 3) return 120;
+                if (cboDefaultFps.SelectedIndex == 4) return 144;
+                return 0;
+            }
+            return config.DefaultFrameRateLimit;
+        }
+
         private void CreateLauncherInExistingFolderDialog()
         {
             SaveConfigFromUI();
@@ -3002,13 +3274,14 @@ namespace BuildServerKit
 
             if (!File.Exists(runUat))
             {
-                MessageBox.Show("RunUAT.bat 파일을 찾을 수 없습니다:\n" + runUat + "\n\n[[3] 설정] 탭에서 Unreal Engine 설치 경로를 확인해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                tabMain.SelectedIndex = 2;
+                MessageBox.Show("RunUAT.bat 파일을 찾을 수 없습니다:\n" + runUat + "\n\n[[5] 경로 & 토큰 설정] 탭에서 Unreal Engine 설치 경로를 확인해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (tabSettingsPage != null) tabMain.SelectedTab = tabSettingsPage;
                 return;
             }
             if (string.IsNullOrEmpty(uproject) || !File.Exists(uproject))
             {
-                MessageBox.Show("워크스페이스 경로에서 *.uproject 파일을 찾을 수 없습니다:\n" + config.ProjectDir + "\n\n먼저 저장소를 연결하고 [[2] 최초 Clone]을 실행해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("워크스페이스 경로에서 *.uproject 파일을 찾을 수 없습니다:\n" + config.ProjectDir + "\n\n먼저 저장소를 연결하고 [[3] 워크플로우 & 초기 세팅] 탭에서 [[2] 최초 Clone]을 실행해 주세요.", "경로 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (tabSetupPage != null) tabMain.SelectedTab = tabSetupPage;
                 return;
             }
 
@@ -3019,7 +3292,7 @@ namespace BuildServerKit
             btnQuickVerify.Enabled = false;
             btnFullPackage.Enabled = false;
             btnStopBuild.Enabled = true;
-            tabMain.SelectedIndex = 0;
+            if (tabConsolePage != null) tabMain.SelectedTab = tabConsolePage;
 
             rtbConsole.Clear();
             rtbErrorsOnly.Clear();
@@ -3335,8 +3608,8 @@ namespace BuildServerKit
             SaveConfigFromUI();
             if (string.IsNullOrWhiteSpace(config.SlackBotToken) || string.IsNullOrWhiteSpace(config.SlackChannelId))
             {
-                MessageBox.Show("[[3] 설정] 탭에서 Slack Bot Token과 채널 ID를 먼저 입력해 주세요.", "설정 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                tabMain.SelectedIndex = 2;
+                MessageBox.Show("[[5] 경로 & 토큰 설정] 탭에서 Slack Bot Token과 채널 ID를 먼저 입력해 주세요.", "설정 필요", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (tabSettingsPage != null) tabMain.SelectedTab = tabSettingsPage;
                 return;
             }
             if (string.IsNullOrEmpty(currentLogFilePath) || !File.Exists(currentLogFilePath))
