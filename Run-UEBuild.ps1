@@ -203,9 +203,11 @@ if ($BuildMode -eq "FullPackage" -and $ExitCode -eq 0 -and $PackageOutDir -and (
         $DefPreset = if ($Cfg -and $Cfg.DefaultQualityPreset) { $Cfg.DefaultQualityPreset } else { "Epic" }
         $DefRes    = if ($Cfg -and $Cfg.DefaultResolution)    { $Cfg.DefaultResolution }    else { "1920x1080" }
         $DefWin    = if ($Cfg -and $Cfg.DefaultWindowMode)    { $Cfg.DefaultWindowMode }    else { "WindowedFullscreen" }
+        $DefFps    = if ($Cfg -and ($null -ne $Cfg.DefaultFrameRateLimit)) { [int]$Cfg.DefaultFrameRateLimit } else { 0 }
+        $DefVSync  = if ($Cfg -and ($null -ne $Cfg.DefaultVSync)) { [bool]$Cfg.DefaultVSync } else { $false }
         $GenLnch   = if ($Cfg -and ($null -ne $Cfg.GenerateLauncherOnPackage)) { [bool]$Cfg.GenerateLauncherOnPackage } else { $true }
         if ($GenLnch) {
-            & $MgrExe --make-launcher $PackageOutDir $ProjectName $DefPreset $DefRes $DefWin | Out-Null
+            & $MgrExe --make-launcher $PackageOutDir $ProjectName $DefPreset $DefRes $DefWin $DefFps $DefVSync | Out-Null
         }
     }
 }

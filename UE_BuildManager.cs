@@ -20,8 +20,8 @@ using Microsoft.CSharp;
 [assembly: AssemblyDescription("All-in-One Dedicated Build Server GUI Manager for Unreal Engine 5, GitHub Actions Self-Hosted Runner, and Slack Error Reporting")]
 [assembly: AssemblyProduct("BuildServerKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 eruminyu. MIT License.")]
-[assembly: AssemblyVersion("1.0.8.0")]
-[assembly: AssemblyFileVersion("1.0.8.0")]
+[assembly: AssemblyVersion("1.0.9.0")]
+[assembly: AssemblyFileVersion("1.0.9.0")]
 
 namespace BuildServerKit
 {
@@ -156,7 +156,7 @@ namespace BuildServerKit
             DefaultResolution = "1920x1080";
             DefaultWindowMode = "WindowedFullscreen";
             DefaultFrameRateLimit = 0;
-            DefaultVSync = true;
+            DefaultVSync = false;
             GenerateLauncherOnPackage = true;
 
             SlackBotToken = "";
@@ -848,7 +848,7 @@ namespace BuildServerKit
             if (cboDefaultFps != null && cboDefaultFps.Items.Count > 0)
                 cboDefaultFps.SelectedIndex = 0;
             if (chkDefaultVSync != null)
-                chkDefaultVSync.Checked = true;
+                chkDefaultVSync.Checked = false;
             if (chkGenerateLauncher != null)
                 chkGenerateLauncher.Checked = true;
             RefreshPackageSummaryBadge();
@@ -1485,7 +1485,7 @@ namespace BuildServerKit
 
             chkDefaultVSync = new CheckBox
             {
-                Text = "수직동기화 (VSync) 기본 활성화",
+                Text = "수직동기화 (VSync) 기본 활성화 (해제 권장 — 고주사율 프레임 저하 방지)",
                 Location = new Point(432, gy + 2),
                 AutoSize = true,
                 Checked = config.DefaultVSync,
@@ -1525,7 +1525,7 @@ namespace BuildServerKit
 
             Label lblLnchDesc = new Label
             {
-                Text = "게임을 켤 때 그래픽 프리셋(낮음~시네마틱), 3D 렌더링 선명도, 해상도, 창 모드, FPS 제한을 고르고 실행할 수 있는 독립 런처를 동봉합니다.",
+                Text = "QHD/4K 모니터에서 '테두리 없는 전체 창 + FHD' 선택 시에도 자동으로 렌더링 스케일(75%/50%)을 보정해 제 해상도 프레임을 보장합니다.",
                 Location = new Point(38, 68),
                 AutoSize = true,
                 ForeColor = FgSub,
@@ -4067,7 +4067,7 @@ namespace BuildServerKit
             sb.AppendFormat("FrameRateLimit={0}.000000\r\n", fpsLimit <= 0 ? 0 : fpsLimit);
             sb.AppendFormat("DesiredScreenWidth={0}\r\n", w);
             sb.AppendFormat("DesiredScreenHeight={0}\r\n", h);
-            sb.AppendLine("bUseDesiredScreenHeight=True");
+            sb.AppendLine("bUseDesiredScreenHeight=False");
             sb.AppendFormat("LastUserConfirmedDesiredScreenWidth={0}\r\n", w);
             sb.AppendFormat("LastUserConfirmedDesiredScreenHeight={0}\r\n", h);
 
@@ -4253,12 +4253,28 @@ namespace UEGameLauncher
 {
     public class LauncherForm : Form
     {
+        [DllImport(""user32.dll"")]
+        private static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport(""user32.dll"")]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport(""gdi32.dll"")]
+        private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+
+        private const int DESKTOPHORZRES = 118;
+        private const int DESKTOPVERTRES = 117;
+        private const int VREFRESH = 116;
+
         private const string ProjectName = ""__PROJECT_NAME__"";
+        private int nativeWidth = 1920;
+        private int nativeHeight = 1080;
+        private int nativeHz = 60;
+
         private ComboBox cboPreset;
         private Label lblPresetDesc;
-        private ComboBox cboResScale;
         private ComboBox cboResolution;
         private ComboBox cboWindowMode;
+        private ComboBox cboResScale;
+        private Label lblEffectiveResInfo;
         private ComboBox cboFpsLimit;
         private CheckBox chkVSync;
 
@@ -4274,15 +4290,16 @@ namespace UEGameLauncher
         {
             ""▶ [Low 0단계] 루멘 GI·그림자·이펙트를 최소화하여 저사양/내장그래픽에서도 최고 프레임을 확보합니다."",
             ""▶ [Medium 1단계] 발열과 GPU 부하를 낮추면서 깔끔한 화면을 유지하는 밸런스 프리셋입니다."",
-            ""▶ [High 2단계] 고품질 라이팅·그림자·반사 효과를 활성화한 고사양 권장 프리셋입니다."",
-            ""▶ [Epic 3단계] 언리얼 엔진 5 표준 최고 그래픽 프리셋 (루멘 GI·고해상도 텍스처·이펙트 전체 활성)"",
+            ""▶ [High 2단계] 고품질 라이팅·그림자를 유지하면서 TSR 히스토리(100%)·루멘 부하를 낮춰 60FPS 방어에 유리합니다."",
+            ""▶ [Epic 3단계] 언리얼 5 최고 그래픽 프리셋 (루멘 GI Epic·TSR 히스토리 200% 활성으로 GPU 부하가 높습니다)"",
             ""▶ [Cinematic 4단계] 실시간 플레이보다 영상 촬영·시연용 극한 품질에 맞춘 최고 부하 프리셋입니다.""
         };
 
         public LauncherForm()
         {
+            DetectNativeMonitor();
             this.Text = ProjectName + "" — 실행 및 그래픽 옵션 설정"";
-            this.ClientSize = new Size(480, 465);
+            this.ClientSize = new Size(510, 504);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
@@ -4292,6 +4309,44 @@ namespace UEGameLauncher
 
             BuildUI();
             LoadLastPrefs();
+            UpdateEffectiveResDesc();
+        }
+
+        private void DetectNativeMonitor()
+        {
+            try
+            {
+                Rectangle bounds = Screen.PrimaryScreen.Bounds;
+                nativeWidth = bounds.Width;
+                nativeHeight = bounds.Height;
+            }
+            catch { }
+
+            IntPtr hdc = IntPtr.Zero;
+            try
+            {
+                hdc = GetDC(IntPtr.Zero);
+                if (hdc != IntPtr.Zero)
+                {
+                    int pw = GetDeviceCaps(hdc, DESKTOPHORZRES);
+                    int ph = GetDeviceCaps(hdc, DESKTOPVERTRES);
+                    int hz = GetDeviceCaps(hdc, VREFRESH);
+                    if (pw >= 640 && ph >= 480)
+                    {
+                        nativeWidth = pw;
+                        nativeHeight = ph;
+                    }
+                    if (hz > 1) nativeHz = hz;
+                }
+            }
+            catch { }
+            finally
+            {
+                if (hdc != IntPtr.Zero)
+                {
+                    try { ReleaseDC(IntPtr.Zero, hdc); } catch { }
+                }
+            }
         }
 
         private void BuildUI()
@@ -4314,7 +4369,8 @@ namespace UEGameLauncher
             };
             Label lblSub = new Label
             {
-                Text = ""언리얼 엔진 기본 그래픽 프리셋(Scalability) 및 해상도·창 모드를 선택하세요."",
+                Text = string.Format(""감지된 모니터: {0}×{1}{2}  |  그래픽 프리셋 및 렌더링 해상도를 선택하세요."",
+                    nativeWidth, nativeHeight, nativeHz > 1 ? "" ("" + nativeHz + ""Hz)"" : """"),
                 Font = new Font(""Malgun Gothic"", 8.8f),
                 ForeColor = FgSub,
                 Location = new Point(20, 40),
@@ -4324,52 +4380,38 @@ namespace UEGameLauncher
             pnlHeader.Controls.Add(lblSub);
             this.Controls.Add(pnlHeader);
 
-            int y = 84;
+            int y = 82;
 
             // 1. 그래픽 프리셋
             AddRowLabel(""그래픽 품질 프리셋:"", y);
-            cboPreset = CreateCombo(new Point(158, y), 300);
+            cboPreset = CreateCombo(new Point(164, y), 326);
             cboPreset.Items.AddRange(new object[]
             {
                 ""낮음 (Low) — 최고 프레임 / 저사양"",
                 ""중간 (Medium) — 발열 감소 / 밸런스"",
-                ""높음 (High) — 고품질 그래픽"",
-                ""에픽 (Epic) — 언리얼 권장 최고 품질"",
+                ""높음 (High) — 고품질 + 60FPS 방어 권장"",
+                ""에픽 (Epic) — 언리얼 5 최고 품질 (고사양)"",
                 ""시네마틱 (Cinematic) — 시연·촬영용 극한 품질""
             });
             cboPreset.SelectedIndex = __DEFAULT_PRESET_IDX__;
             cboPreset.SelectedIndexChanged += (s, e) => UpdatePresetDesc();
             this.Controls.Add(cboPreset);
-            y += 31;
+            y += 30;
 
             lblPresetDesc = new Label
             {
                 Location = new Point(20, y),
-                Size = new Size(440, 34),
+                Size = new Size(470, 34),
                 ForeColor = Color.FromArgb(140, 210, 255),
                 Font = new Font(""Malgun Gothic"", 8.3f)
             };
             this.Controls.Add(lblPresetDesc);
             UpdatePresetDesc();
-            y += 40;
-
-            // 2. 3D 렌더링 스케일
-            AddRowLabel(""3D 렌더링 선명도:"", y);
-            cboResScale = CreateCombo(new Point(158, y), 300);
-            cboResScale.Items.AddRange(new object[]
-            {
-                ""100% (원본 해상도 선명도 - 권장)"",
-                ""85% (고프레임 업스케일)"",
-                ""75% (성능 우선)"",
-                ""50% (초저사양 모드)""
-            });
-            cboResScale.SelectedIndex = 0;
-            this.Controls.Add(cboResScale);
             y += 38;
 
-            // 3. 화면 해상도
-            AddRowLabel(""화면 해상도:"", y);
-            cboResolution = CreateCombo(new Point(158, y), 300);
+            // 2. 화면 해상도
+            AddRowLabel(""목표 화면 해상도:"", y);
+            cboResolution = CreateCombo(new Point(164, y), 326);
             List<string> resItems = new List<string>
             {
                 ""1280 x 720 (HD)"",
@@ -4378,24 +4420,20 @@ namespace UEGameLauncher
                 ""2560 x 1440 (QHD)"",
                 ""3840 x 2160 (4K UHD)""
             };
-            try
+            string nativeKey = nativeWidth + "" x "" + nativeHeight;
+            if (!resItems.Any(r => r.StartsWith(nativeKey)))
             {
-                Rectangle bounds = Screen.PrimaryScreen.Bounds;
-                string nativeKey = bounds.Width + "" x "" + bounds.Height;
-                if (!resItems.Any(r => r.StartsWith(nativeKey)))
-                {
-                    resItems.Add(nativeKey + "" (현재 모니터 기본)"");
-                }
+                resItems.Add(nativeKey + "" (현재 모니터 기본)"");
             }
-            catch { }
             cboResolution.Items.AddRange(resItems.ToArray());
             SelectResolutionByText(""__DEFAULT_RES__"");
+            cboResolution.SelectedIndexChanged += (s, e) => UpdateEffectiveResDesc();
             this.Controls.Add(cboResolution);
-            y += 38;
+            y += 36;
 
-            // 4. 화면(창) 모드
+            // 3. 화면(창) 모드
             AddRowLabel(""화면 표시 모드:"", y);
-            cboWindowMode = CreateCombo(new Point(158, y), 300);
+            cboWindowMode = CreateCombo(new Point(164, y), 326);
             cboWindowMode.Items.AddRange(new object[]
             {
                 ""테두리 없는 전체 창 (Windowed Fullscreen)"",
@@ -4403,12 +4441,40 @@ namespace UEGameLauncher
                 ""창 모드 (Windowed)""
             });
             cboWindowMode.SelectedIndex = __DEFAULT_WINMODE_IDX__;
+            cboWindowMode.SelectedIndexChanged += (s, e) => UpdateEffectiveResDesc();
             this.Controls.Add(cboWindowMode);
+            y += 36;
+
+            // 4. 3D 렌더링 선명도 (자동 해상도 보정 기본)
+            AddRowLabel(""3D 렌더링 스케일:"", y);
+            cboResScale = CreateCombo(new Point(164, y), 326);
+            cboResScale.Items.AddRange(new object[]
+            {
+                ""자동 (선택한 목표 해상도에 정확히 맞춤 — 권장)"",
+                ""100% (창 크기 원본 1:1 렌더링)"",
+                ""85% (고프레임 업스케일)"",
+                ""75% (성능 우선)"",
+                ""67% (고성능 업스케일)"",
+                ""50% (초저사양 모드)""
+            });
+            cboResScale.SelectedIndex = 0;
+            cboResScale.SelectedIndexChanged += (s, e) => UpdateEffectiveResDesc();
+            this.Controls.Add(cboResScale);
+            y += 30;
+
+            lblEffectiveResInfo = new Label
+            {
+                Location = new Point(20, y),
+                Size = new Size(470, 34),
+                ForeColor = Color.FromArgb(130, 230, 165),
+                Font = new Font(""Malgun Gothic"", 8.3f, FontStyle.Bold)
+            };
+            this.Controls.Add(lblEffectiveResInfo);
             y += 38;
 
             // 5. 최대 프레임 제한
             AddRowLabel(""최대 프레임 제한:"", y);
-            cboFpsLimit = CreateCombo(new Point(158, y), 300);
+            cboFpsLimit = CreateCombo(new Point(164, y), 326);
             cboFpsLimit.Items.AddRange(new object[]
             {
                 ""무제한 (Unlimited)"",
@@ -4419,26 +4485,26 @@ namespace UEGameLauncher
             });
             SelectFpsByValue(__DEFAULT_FPS__);
             this.Controls.Add(cboFpsLimit);
-            y += 36;
+            y += 35;
 
             // 6. 수직동기화
             chkVSync = new CheckBox
             {
-                Text = ""수직동기화 (VSync 켜기 — 화면 찢어짐 방지)"",
-                Location = new Point(158, y),
+                Text = ""수직동기화 (VSync 켜기 — 고주사율 모니터는 해제 권장)"",
+                Location = new Point(164, y),
                 AutoSize = true,
                 Checked = __DEFAULT_VSYNC__,
                 ForeColor = FgText
             };
             this.Controls.Add(chkVSync);
-            y += 38;
+            y += 36;
 
             // 하단 실행 버튼 영역
             Button btnLaunch = new Button
             {
                 Text = ""▶ 선택한 옵션으로 게임 시작"",
                 Location = new Point(18, y),
-                Size = new Size(276, 46),
+                Size = new Size(298, 46),
                 BackColor = AccentGreen,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -4451,8 +4517,8 @@ namespace UEGameLauncher
             Button btnSaveOnly = new Button
             {
                 Text = ""설정만 저장"",
-                Location = new Point(302, y),
-                Size = new Size(88, 46),
+                Location = new Point(324, y),
+                Size = new Size(94, 46),
                 BackColor = AccentBlue,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
@@ -4465,8 +4531,8 @@ namespace UEGameLauncher
             Button btnClose = new Button
             {
                 Text = ""닫기"",
-                Location = new Point(396, y),
-                Size = new Size(64, 46),
+                Location = new Point(424, y),
+                Size = new Size(66, 46),
                 BackColor = BgCard,
                 ForeColor = FgSub,
                 FlatStyle = FlatStyle.Flat,
@@ -4511,6 +4577,108 @@ namespace UEGameLauncher
             int idx = cboPreset.SelectedIndex;
             if (idx >= 0 && idx < PresetDescriptions.Length && lblPresetDesc != null)
                 lblPresetDesc.Text = PresetDescriptions[idx];
+        }
+
+        private int ManualIndexToScale(int idx)
+        {
+            if (idx == 2) return 85;
+            if (idx == 3) return 75;
+            if (idx == 4) return 67;
+            if (idx == 5) return 50;
+            return 100;
+        }
+
+        private void ComputeEffectiveRenderParams(
+            out int targetW,
+            out int targetH,
+            out int winW,
+            out int winH,
+            out int ueFullscreenMode,
+            out int effectiveScale)
+        {
+            targetW = 1920;
+            targetH = 1080;
+            if (cboResolution != null)
+            {
+                var m = Regex.Match(cboResolution.Text ?? """", @""(\d{3,5})\s*x\s*(\d{3,5})"");
+                if (m.Success)
+                {
+                    int.TryParse(m.Groups[1].Value, out targetW);
+                    int.TryParse(m.Groups[2].Value, out targetH);
+                }
+            }
+
+            // UI: 0=WindowedFullscreen(UE:1), 1=Fullscreen(UE:0), 2=Windowed(UE:2)
+            ueFullscreenMode = 1;
+            if (cboWindowMode != null)
+            {
+                if (cboWindowMode.SelectedIndex == 1) ueFullscreenMode = 0;
+                else if (cboWindowMode.SelectedIndex == 2) ueFullscreenMode = 2;
+            }
+
+            int scaleIdx = cboResScale != null ? cboResScale.SelectedIndex : 0;
+
+            if (ueFullscreenMode == 1)
+            {
+                // Windowed Fullscreen은 Windows 바탕화면 해상도로 창이 열림
+                winW = nativeWidth;
+                winH = nativeHeight;
+                if (scaleIdx <= 0)
+                {
+                    if (targetW < nativeWidth || targetH < nativeHeight)
+                    {
+                        double ratio = Math.Min((double)targetW / (double)nativeWidth, (double)targetH / (double)nativeHeight);
+                        effectiveScale = Math.Max(33, Math.Min(100, (int)Math.Round(ratio * 100.0)));
+                    }
+                    else
+                    {
+                        effectiveScale = 100;
+                    }
+                }
+                else
+                {
+                    effectiveScale = ManualIndexToScale(scaleIdx);
+                }
+            }
+            else
+            {
+                winW = targetW;
+                winH = targetH;
+                effectiveScale = scaleIdx <= 0 ? 100 : ManualIndexToScale(scaleIdx);
+            }
+        }
+
+        private void UpdateEffectiveResDesc()
+        {
+            if (lblEffectiveResInfo == null) return;
+            int targetW, targetH, winW, winH, ueMode, effScale;
+            ComputeEffectiveRenderParams(out targetW, out targetH, out winW, out winH, out ueMode, out effScale);
+
+            int renderW = (int)Math.Round(winW * (effScale / 100.0));
+            int renderH = (int)Math.Round(winH * (effScale / 100.0));
+            int scaleIdx = cboResScale != null ? cboResScale.SelectedIndex : 0;
+
+            if (ueMode == 1 && scaleIdx <= 0 && effScale < 100)
+            {
+                lblEffectiveResInfo.ForeColor = Color.FromArgb(130, 230, 165);
+                lblEffectiveResInfo.Text = string.Format(
+                    ""✔ 자동 해상도 보정: 전체 창({0}×{1})을 유지하며 실제 3D 렌더링은 {2}×{3} (sg.ResolutionQuality={4}%)로 작동합니다."",
+                    winW, winH, renderW, renderH, effScale);
+            }
+            else if (ueMode == 1 && scaleIdx == 1 && (targetW < nativeWidth || targetH < nativeHeight))
+            {
+                lblEffectiveResInfo.ForeColor = Color.FromArgb(255, 195, 95);
+                lblEffectiveResInfo.Text = string.Format(
+                    ""! 주의: 전체 창에서 수동 100% 강제 시 {0}×{1} 대신 모니터 원본({2}×{3})으로 무겁게 렌더링됩니다."",
+                    targetW, targetH, winW, winH);
+            }
+            else
+            {
+                lblEffectiveResInfo.ForeColor = Color.FromArgb(145, 210, 255);
+                lblEffectiveResInfo.Text = string.Format(
+                    ""✔ 실제 적용: 창/출력 {0}×{1} → 3D 내부 렌더링 {2}×{3} ({4}%)"",
+                    winW, winH, renderW, renderH, effScale);
+            }
         }
 
         private void SelectResolutionByText(string res)
@@ -4560,7 +4728,7 @@ namespace UEGameLauncher
                     int iv;
                     if (k == ""Preset"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboPreset.Items.Count)
                         cboPreset.SelectedIndex = iv;
-                    else if (k == ""ResScale"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboResScale.Items.Count)
+                    else if (k == ""ResScaleV2"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboResScale.Items.Count)
                         cboResScale.SelectedIndex = iv;
                     else if (k == ""Resolution"")
                         SelectResolutionByText(v);
@@ -4568,7 +4736,7 @@ namespace UEGameLauncher
                         cboWindowMode.SelectedIndex = iv;
                     else if (k == ""FpsIdx"" && int.TryParse(v, out iv) && iv >= 0 && iv < cboFpsLimit.Items.Count)
                         cboFpsLimit.SelectedIndex = iv;
-                    else if (k == ""VSync"")
+                    else if (k == ""VSyncV2"")
                         chkVSync.Checked = v.Equals(""true"", StringComparison.OrdinalIgnoreCase);
                 }
             }
@@ -4581,11 +4749,11 @@ namespace UEGameLauncher
             {
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine(""Preset="" + cboPreset.SelectedIndex);
-                sb.AppendLine(""ResScale="" + cboResScale.SelectedIndex);
+                sb.AppendLine(""ResScaleV2="" + cboResScale.SelectedIndex);
                 sb.AppendLine(""Resolution="" + resKey);
                 sb.AppendLine(""WinMode="" + cboWindowMode.SelectedIndex);
                 sb.AppendLine(""FpsIdx="" + cboFpsLimit.SelectedIndex);
-                sb.AppendLine(""VSync="" + (chkVSync.Checked ? ""true"" : ""false""));
+                sb.AppendLine(""VSyncV2="" + (chkVSync.Checked ? ""true"" : ""false""));
                 File.WriteAllText(GetPrefsFilePath(), sb.ToString(), new UTF8Encoding(false));
             }
             catch { }
@@ -4594,23 +4762,8 @@ namespace UEGameLauncher
         private void ApplyAndLaunch(bool launchGame)
         {
             int q = cboPreset.SelectedIndex >= 0 ? cboPreset.SelectedIndex : 3;
-            int resScale = 100;
-            if (cboResScale.SelectedIndex == 1) resScale = 85;
-            else if (cboResScale.SelectedIndex == 2) resScale = 75;
-            else if (cboResScale.SelectedIndex == 3) resScale = 50;
-
-            int w = 1920, h = 1080;
-            var m = Regex.Match(cboResolution.Text ?? """", @""(\d{3,5})\s*x\s*(\d{3,5})"");
-            if (m.Success)
-            {
-                int.TryParse(m.Groups[1].Value, out w);
-                int.TryParse(m.Groups[2].Value, out h);
-            }
-
-            // UI: 0=WindowedFullscreen(UE:1), 1=Fullscreen(UE:0), 2=Windowed(UE:2)
-            int ueFullscreenMode = 1;
-            if (cboWindowMode.SelectedIndex == 1) ueFullscreenMode = 0;
-            else if (cboWindowMode.SelectedIndex == 2) ueFullscreenMode = 2;
+            int targetW, targetH, winW, winH, ueFullscreenMode, effectiveScale;
+            ComputeEffectiveRenderParams(out targetW, out targetH, out winW, out winH, out ueFullscreenMode, out effectiveScale);
 
             int fps = 0;
             if (cboFpsLimit.SelectedIndex == 1) fps = 30;
@@ -4619,7 +4772,7 @@ namespace UEGameLauncher
             else if (cboFpsLimit.SelectedIndex == 4) fps = 144;
 
             bool vsync = chkVSync.Checked;
-            SaveLastPrefs(w + ""x"" + h);
+            SaveLastPrefs(targetW + ""x"" + targetH);
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -4632,14 +4785,22 @@ namespace UEGameLauncher
 
             foreach (var iniPath in targetInis)
             {
-                try { WriteUe5Ini(iniPath, q, resScale, w, h, ueFullscreenMode, fps, vsync); }
+                try { WriteUe5Ini(iniPath, q, effectiveScale, winW, winH, ueFullscreenMode, fps, vsync); }
                 catch { }
             }
 
             if (!launchGame)
             {
+                int rw = (int)Math.Round(winW * (effectiveScale / 100.0));
+                int rh = (int)Math.Round(winH * (effectiveScale / 100.0));
                 MessageBox.Show(
-                    ""선택한 그래픽 프리셋 및 디스플레이 설정이 저장되었습니다!\n이제 "" + ProjectName + "".exe 를 직접 실행하셔도 이 옵션으로 시작됩니다."",
+                    string.Format(
+                        ""선택한 그래픽 프리셋 및 디스플레이 설정이 저장되었습니다!\n\n"" +
+                        ""• 창/출력 크기: {0}×{1}\n"" +
+                        ""• 실제 3D 렌더링: {2}×{3} (sg.ResolutionQuality={4}%)\n"" +
+                        ""• 수직동기화(VSync): {5}\n\n"" +
+                        ""이제 {6}.exe 를 직접 실행하셔도 이 옵션으로 시작됩니다."",
+                        winW, winH, rw, rh, effectiveScale, vsync ? ""ON"" : ""OFF"", ProjectName),
                     ""설정 저장 완료"", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -4654,8 +4815,8 @@ namespace UEGameLauncher
             }
 
             List<string> args = new List<string>();
-            args.Add(""-ResX="" + w);
-            args.Add(""-ResY="" + h);
+            args.Add(""-ResX="" + winW);
+            args.Add(""-ResY="" + winH);
             if (ueFullscreenMode == 0) args.Add(""-FULLSCREEN"");
             else if (ueFullscreenMode == 2) args.Add(""-WINDOWED"");
             args.Add(vsync ? ""-VSync"" : ""-NoVSync"");
@@ -4748,7 +4909,7 @@ namespace UEGameLauncher
             sb.AppendFormat(""FrameRateLimit={0}.000000\r\n"", fps <= 0 ? 0 : fps);
             sb.AppendFormat(""DesiredScreenWidth={0}\r\n"", w);
             sb.AppendFormat(""DesiredScreenHeight={0}\r\n"", h);
-            sb.AppendLine(""bUseDesiredScreenHeight=True"");
+            sb.AppendLine(""bUseDesiredScreenHeight=False"");
             sb.AppendFormat(""LastUserConfirmedDesiredScreenWidth={0}\r\n"", w);
             sb.AppendFormat(""LastUserConfirmedDesiredScreenHeight={0}\r\n"", h);
 
@@ -4789,8 +4950,12 @@ namespace UEGameLauncher
                 string preset = args.Length >= 4 ? args[3] : "Epic";
                 string res = args.Length >= 5 ? args[4] : "1920x1080";
                 string winMode = args.Length >= 6 ? args[5] : "WindowedFullscreen";
+                int defFps = 0;
+                if (args.Length >= 7) int.TryParse(args[6], out defFps);
+                bool defVsync = false;
+                if (args.Length >= 8) bool.TryParse(args[7], out defVsync);
                 string outPath, err;
-                bool ok = GameLauncherBuilder.GenerateLauncherInPackage(pkgDir, projName, preset, res, winMode, 0, true, out outPath, out err);
+                bool ok = GameLauncherBuilder.GenerateLauncherInPackage(pkgDir, projName, preset, res, winMode, defFps, defVsync, out outPath, out err);
                 Environment.Exit(ok ? 0 : 1);
                 return;
             }
