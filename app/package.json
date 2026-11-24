@@ -1,0 +1,58 @@
+{
+  "name": "buildserverkit-studio",
+  "productName": "BuildServerKit Studio",
+  "version": "2.0.0",
+  "author": "BuildServerKit",
+  "description": "UE5 Perforce Hybrid & GitHub Actions All-in-One Build Server Manager (Electron + Tailscale Remote Dashboard)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:portable": "electron-builder --win portable",
+    "dist:dir": "electron-builder --win dir"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.6.3"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.buildserverkit.studio",
+    "productName": "BuildServerKit Studio",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "kit",
+        "filter": [
+          "*.ps1",
+          "*.yml",
+          "*.example.json",
+          "UE_BuildManager.exe"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "src/assets/icon.png",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "BuildServerKit_Studio_Portable.exe"
+    }
+  }
+}

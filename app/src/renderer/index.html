@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:;" />
+  <title>BuildServerKit Studio</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Custom Frameless Titlebar -->
+    <header class="titlebar">
+      <div class="titlebar-left">
+        <div class="brand">
+          <div class="brand-mark">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <span>BuildServerKit Studio</span>
+          <span class="brand-version">v2.0</span>
+        </div>
+        <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
+      </div>
+
+      <div class="titlebar-center">
+        <div id="topStatusPill" class="status-pill">
+          <span class="dot"></span>
+          <span id="topStatusText">대기 중 (IDLE)</span>
+        </div>
+        <span id="topTimerChip" class="timer-chip">00분 00초</span>
+      </div>
+
+      <div class="titlebar-controls">
+        <button id="btnWinTray" class="win-btn" title="트레이로 숨기기">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+        </button>
+        <button id="btnWinMin" class="win-btn" title="최소화">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button id="btnWinMax" class="win-btn" title="최대화 / 복원">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        </button>
+        <button id="btnWinClose" class="win-btn close" title="종료">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Remote Web Dashboard Banner (shown only when opened via Tailscale Browser) -->
+    <div id="remoteBanner" class="remote-banner">
+      <span>🌐 <strong>Tailscale 원격 웹 대시보드</strong>로 실시간 접속 중입니다.</span>
+      <span id="remoteModeBadge" class="badge badge-blue">읽기 전용 모드</span>
+    </div>
+
+    <div class="workspace">
+      <!-- Left Navigation Sidebar -->
+      <aside class="sidebar">
+        <div class="nav-section-label">Workspace</div>
+        <button class="nav-item active" data-view="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+          <span>대시보드 & 콘솔</span>
+          <span id="navErrBadge" class="nav-badge danger" style="display:none">0</span>
+        </button>
+        <button class="nav-item" data-view="packaging">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          <span>패키징 & 보관 관리</span>
+          <span id="navPkgBadge" class="nav-badge">0/10</span>
+        </button>
+
+        <div class="nav-section-label">Pipeline</div>
+        <button class="nav-item" data-view="perforce">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          <span>Perforce & 미러링</span>
+          <span id="navMirrorBadge" class="nav-badge">OFF</span>
+        </button>
+        <button class="nav-item" data-view="github">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
+          <span>GitHub & Runner</span>
+          <span id="navRunnerBadge" class="nav-badge">OFF</span>
+        </button>
+
+        <div class="nav-section-label">Operations</div>
+        <button class="nav-item" data-view="history">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>빌드 히스토리</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>알림 · 네트워크 · 설정</span>
+        </button>
+
+        <div class="sidebar-footer">
+          <button id="btnOpenWizardSide" class="btn btn-sm btn-wizard-launch local-only" style="width:100%;">
+            ✨ 설정 마법사 &amp; PC 진단
+          </button>
+          <div class="sidebar-meta-row">
+            <span>저장소</span>
+            <strong id="sideRepoName">미연결</strong>
+          </div>
+          <div class="sidebar-meta-row">
+            <span>P4 스트림</span>
+            <strong id="sideStreamName">//MyProject/main</strong>
+          </div>
+          <div class="sidebar-meta-row">
+            <span>웹 대시보드</span>
+            <strong id="sideWebStatus">꺼짐</strong>
+          </div>
+          <button id="btnSideOpenArchive" class="btn btn-sm local-only" style="width:100%; margin-top:4px;">
+            보관함 폴더 열기
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Content Views -->
+      <main class="content-area">
+        <!-- ==================== VIEW 1: DASHBOARD ==================== -->
+        <section id="view-dashboard" class="view-panel active">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">빌드 컨트롤 센터</h1>
+              <p id="dashSubtitle" class="page-subtitle">Perforce 제출 → GitHub 코드·에셋 미러링 → 로컬 초고속 UE5 패키징 파이프라인</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button id="btnOpenWizardDash" class="btn btn-sm btn-wizard-launch local-only">✨ 설정 마법사</button>
+              <button id="btnDashRefresh" class="btn btn-sm">↻ 상태 새로고침</button>
+              <button id="btnDashOpenLogs" class="btn btn-sm local-only">로그 폴더</button>
+              <button id="btnDashOpenPkgs" class="btn btn-sm local-only">패키지 폴더</button>
+            </div>
+          </div>
+
+          <!-- 4 KPI Cards -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>빌드 상태</span>
+                <span id="kpiBuildModeBadge" class="badge badge-slate">IDLE</span>
+              </div>
+              <div id="kpiBuildVal" class="kpi-value">대기 중</div>
+              <div id="kpiBuildSub" class="kpi-sub">최근 빌드 기록 없음</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>Perforce → GitHub 미러</span>
+                <span id="kpiMirrorBadge" class="badge badge-slate">수동</span>
+              </div>
+              <div id="kpiMirrorVal" class="kpi-value">CL #0</div>
+              <div id="kpiMirrorSub" class="kpi-sub">아직 동기화 실행 안 됨</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>GitHub Actions Runner</span>
+                <span id="kpiRunnerBadge" class="badge badge-slate">중지</span>
+              </div>
+              <div id="kpiRunnerVal" class="kpi-value">미실행</div>
+              <div id="kpiRunnerSub" class="kpi-sub">GitHub & Runner 탭에서 제어</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>패키징 보관함 · 디스크</span>
+                <span id="kpiRetainBadge" class="badge badge-blue">최대 10개</span>
+              </div>
+              <div id="kpiPkgVal" class="kpi-value">0 / 10개</div>
+              <div class="progress-track">
+                <div id="kpiDiskBar" class="progress-fill" style="width: 0%;"></div>
+              </div>
+              <div id="kpiDiskSub" class="kpi-sub">디스크 여유 공간 확인 중...</div>
+            </div>
+          </div>
+
+          <!-- Primary Build Action Bar -->
+          <div class="action-bar">
+            <button id="btnSyncSource" class="btn trigger-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              <span id="lblSyncSourceBtn">P4 최신 동기화</span>
+            </button>
+            <button id="btnQuickVerify" class="btn btn-success btn-lg trigger-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              빠른 검증 (QuickVerify)
+            </button>
+            <button id="btnFullPackage" class="btn btn-primary btn-lg trigger-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              전체 패키징 (FullPackage)
+            </button>
+            <button id="btnStopBuild" class="btn btn-danger trigger-btn" disabled>■ 중단</button>
+
+            <div class="action-bar-meta">
+              <span id="dashProfilePill" class="badge badge-violet">Development · Epic · 1920x1080</span>
+              <button id="btnMirrorQuick" class="btn btn-sm trigger-btn">↻ P4 미러링 지금 실행</button>
+            </div>
+          </div>
+
+          <!-- Split Live Terminal & Error Panel -->
+          <div class="terminal-card">
+            <div class="terminal-toolbar">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div class="segmented">
+                  <button id="tabTermAll" class="active">전체 콘솔</button>
+                  <button id="tabTermErr">에러만 (<span id="termErrCount">0</span>)</button>
+                </div>
+                <input id="txtLogFilter" class="input" style="width:220px; height:30px; font-size:12px;" placeholder="로그 키워드 필터..." />
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button id="btnSendReportManual" class="btn btn-sm local-only">알림 즉시 전송 (Slack/Discord)</button>
+                <button id="btnCopyLog" class="btn btn-sm">복사</button>
+                <button id="btnClearLog" class="btn btn-sm local-only">지우기</button>
+              </div>
+            </div>
+            <div id="terminalOutput" class="terminal-body"></div>
+            <div id="errorDrawer" class="error-drawer" style="display:none;">
+              <div class="error-drawer-head">
+                <span>⚠ 핵심 에러 / 경고 자동 발췌 (C++ 컴파일, 쿠킹 실패, Ensure)</span>
+                <span id="errDrawerCount">0건</span>
+              </div>
+              <div id="errorDrawerBody" class="error-drawer-body"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 2: PACKAGING & RETENTION ==================== -->
+        <section id="view-packaging" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">패키징 옵션 & 보관 개수 관리</h1>
+              <p class="page-subtitle">1TB 노트북 디스크를 보호하기 위한 패키징 보관 정책과 언리얼 기본 그래픽·런처 설정을 관리합니다.</p>
+            </div>
+            <button id="btnSavePkgTab" class="btn btn-primary local-only">✔ 옵션 저장</button>
+          </div>
+
+          <!-- ★ Featured Card: Package Build Retention Policy -->
+          <div class="card featured">
+            <div class="card-header">
+              <div>
+                <div class="card-title">
+                  <span>📦 패키징 빌드 보관 개수 제한 (자동 정리)</span>
+                  <span id="retentionStatusBadge" class="badge badge-green">사용함 · 최신 10개 유지</span>
+                </div>
+                <div class="card-desc">새 전체 패키징(FullPackage)이 성공할 때마다 설정한 개수만 남기고 가장 오래된 패키징 폴더부터 자동으로 삭제합니다.</div>
+              </div>
+              <button id="btnPruneNow" class="btn btn-sm trigger-btn">🧹 지금 오래된 빌드 정리</button>
+            </div>
+
+            <div class="toggle-row">
+              <div>
+                <div class="toggle-label-title">오래된 패키징 자동 정리 사용</div>
+                <div class="toggle-label-sub">끄면(사용안함) 모든 패키징 결과물을 삭제하지 않고 무제한 보관합니다.</div>
+              </div>
+              <label class="switch">
+                <input id="chkEnableRetention" type="checkbox" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+
+            <div id="retentionControlBox" class="retention-controls">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-weight:600; font-size:13px; color:var(--text-secondary);">최대 유지 개수:</span>
+                <div class="stepper">
+                  <button id="btnRetainMinus" type="button">−</button>
+                  <input id="numMaxPackages" type="number" min="1" max="200" value="10" />
+                  <button id="btnRetainPlus" type="button">+</button>
+                </div>
+                <span style="font-size:12.5px; color:var(--text-muted);">개 유지 (초과 시 오래된 순 자동 삭제)</span>
+              </div>
+              <div class="chip-group" style="margin-left:auto;">
+                <button class="chip retain-preset" data-val="3">3개</button>
+                <button class="chip retain-preset" data-val="5">5개</button>
+                <button class="chip retain-preset active" data-val="10">10개 (기본)</button>
+                <button class="chip retain-preset" data-val="15">15개</button>
+                <button class="chip retain-preset" data-val="20">20개</button>
+              </div>
+            </div>
+
+            <!-- Live Disk & Archive Bar -->
+            <div style="margin-top:16px; display:flex; align-items:center; justify-content:space-between; font-size:12.5px; margin-bottom:6px;">
+              <span id="pkgDiskLabel" style="color:var(--text-secondary);">보관 중인 패키지: 0개 (0 B)</span>
+              <span id="pkgDiskFree" style="color:var(--text-muted);">디스크 여유 공간 계산 중...</span>
+            </div>
+            <div class="progress-track" style="height:8px; margin-bottom:14px;">
+              <div id="pkgDiskBar" class="progress-fill" style="width:0%;"></div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:52px;">순서</th>
+                    <th>패키징 폴더명 (Build ID)</th>
+                    <th style="width:110px;">용량</th>
+                    <th style="width:165px;">생성 시각</th>
+                    <th style="width:130px;">보관 상태</th>
+                    <th style="width:140px; text-align:right;">작업</th>
+                  </tr>
+                </thead>
+                <tbody id="pkgArchiveTableBody">
+                  <tr><td colspan="6" class="empty-state">보관된 패키징 빌드가 없습니다.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Client Build Config & Graphics Preset -->
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">⚙ 언리얼 빌드 구성 (Client Configuration)</div>
+                  <div class="card-desc">QuickVerify 및 FullPackage 실행 시 적용되는 UE5 클라이언트 구성입니다.</div>
+                </div>
+              </div>
+              <div class="option-cards-3" id="clientConfigCards">
+                <div class="option-card active" data-cfg="Development">
+                  <div class="option-card-title">Development</div>
+                  <div class="option-card-sub">콘솔(~), 로그 포함 · 팀 테스트 권장</div>
+                </div>
+                <div class="option-card" data-cfg="Shipping">
+                  <div class="option-card-title">Shipping</div>
+                  <div class="option-card-sub">디버그 제거 · 최종 배포 최대 최적화</div>
+                </div>
+                <div class="option-card" data-cfg="DebugGame">
+                  <div class="option-card-title">DebugGame</div>
+                  <div class="option-card-sub">프로젝트 C++ 모듈 심층 디버깅</div>
+                </div>
+              </div>
+
+              <div class="toggle-row" style="margin-top:14px;">
+                <div>
+                  <div class="toggle-label-title">게임 실행 옵션 런처 (_Launcher.exe) 자동 동봉</div>
+                  <div class="toggle-label-sub">30KB 초경량 C# 런처를 패키징 결과물 폴더에 자동 생성합니다.</div>
+                </div>
+                <label class="switch">
+                  <input id="chkGenLauncher" type="checkbox" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+              <div style="margin-top:12px;">
+                <button id="btnManualLauncher" class="btn btn-violet local-only" style="width:100%;">★ 기존 패키징 폴더 선택해서 런처 즉시 생성</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🎨 기본 그래픽 프리셋 & 디스플레이</div>
+                  <div class="card-desc">패키징 시 기본 설정과 동봉 런처 초기값에 반영됩니다.</div>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label>그래픽 프리셋</label>
+                  <select id="selQualityPreset" class="select">
+                    <option value="Low">Low (낮음 — 최고 프레임)</option>
+                    <option value="Medium">Medium (중간 — 밸런스)</option>
+                    <option value="High">High (높음 — 고품질 라이팅)</option>
+                    <option value="Epic">Epic (에픽 — UE5 기본 최고 품질)</option>
+                    <option value="Cinematic">Cinematic (시네마틱 — 시연/영상)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>기본 해상도</label>
+                  <select id="selResolution" class="select">
+                    <option value="1280x720">1280x720 (HD)</option>
+                    <option value="1600x900">1600x900 (HD+)</option>
+                    <option value="1920x1080">1920x1080 (FHD)</option>
+                    <option value="2560x1440">2560x1440 (QHD)</option>
+                    <option value="3840x2160">3840x2160 (4K UHD)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>화면 모드</label>
+                  <select id="selWindowMode" class="select">
+                    <option value="WindowedFullscreen">테두리 없는 전체 창 (권장)</option>
+                    <option value="Fullscreen">전체 화면 (Exclusive)</option>
+                    <option value="Windowed">창 모드 (Windowed)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>최대 프레임 제한</label>
+                  <select id="selFpsLimit" class="select">
+                    <option value="0">무제한 (Unlimited)</option>
+                    <option value="30">30 FPS</option>
+                    <option value="60">60 FPS</option>
+                    <option value="120">120 FPS</option>
+                    <option value="144">144 FPS</option>
+                  </select>
+                </div>
+              </div>
+              <div class="toggle-row" style="margin-top:12px;">
+                <div>
+                  <div class="toggle-label-title">수직동기화 (VSync) 기본 활성화</div>
+                  <div class="toggle-label-sub">고주사율 모니터 프레임 저하 방지를 위해 기본 해제 권장</div>
+                </div>
+                <label class="switch">
+                  <input id="chkVSync" type="checkbox" />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 3: PERFORCE & MIRROR ==================== -->
+        <section id="view-perforce" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">Perforce 서버 & GitHub 코드·에셋 자동 미러링</h1>
+              <p class="page-subtitle">Read-Only 전용 봇(p4bot) 기준 세팅 · 아티스트 에셋 Submit 1줄 로그 기록 · 새벽 정기 백업</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <div class="segmented" id="vcsModeSegmented">
+                <button data-mode="PerforceHybrid" class="active">Perforce 하이브리드</button>
+                <button data-mode="Git">Git 단독 모드</button>
+              </div>
+              <button id="btnSaveP4Tab" class="btn btn-primary local-only">✔ P4 설정 저장</button>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <!-- P4 Server & Workspaces -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🔗 Perforce 연결 & 워크스페이스</div>
+                  <div class="card-desc">4인 팀 권장: 5번째 계정 <code>p4bot</code> (Read-Only + 무기한 티켓). 추후 5인 충원 시 관리자 ID로 변경만 하면 됩니다.</div>
+                </div>
+                <button id="btnP4Test" class="btn btn-sm btn-violet local-only">연결 & 티켓 테스트</button>
+              </div>
+
+              <div class="form-grid">
+                <div class="field">
+                  <label>P4PORT (서버 주소)</label>
+                  <input id="txtP4Port" class="input mono" placeholder="localhost:1666" />
+                </div>
+                <div class="field">
+                  <label>P4USER (자동화 계정)</label>
+                  <input id="txtP4User" class="input mono" placeholder="p4bot" />
+                </div>
+                <div class="field full">
+                  <label>대상 Stream 경로 (P4Stream)</label>
+                  <input id="txtP4Stream" class="input mono" placeholder="//MyProject/main" />
+                </div>
+                <div class="field">
+                  <label>빌드 전용 워크스페이스 (전체 코드+에셋)</label>
+                  <input id="txtP4BuildClient" class="input mono" placeholder="ws-build-full" />
+                  <span class="field-hint">옵션: allwrite clobber 권장</span>
+                </div>
+                <div class="field">
+                  <label>미러 전용 워크스페이스 (코드/설정만)</label>
+                  <input id="txtP4MirrorClient" class="input mono" placeholder="ws-mirror-code" />
+                  <span class="field-hint">View에서 -//.../Content/... 제외</span>
+                </div>
+                <div class="field full">
+                  <label>로컬 Git 미러링 폴더 (P4MirrorDir)</label>
+                  <div class="input-group">
+                    <input id="txtP4MirrorDir" class="input mono" />
+                    <button class="btn btn-sm pick-folder-btn local-only" data-target="txtP4MirrorDir">찾아보기</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="p4DiagBox" class="feed-item" style="margin-top:12px; display:none;"></div>
+            </div>
+
+            <!-- Auto Mirroring Control -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🔄 P4 → GitHub 자동 미러링 제어</div>
+                  <div class="card-desc">워터마크 순차 처리로 CL 유실 없이 원작성자 잔디 + 에셋 1줄 요약 로그를 Push합니다.</div>
+                </div>
+                <span id="mirrorLiveBadge" class="badge badge-slate">CL #0</span>
+              </div>
+
+              <div class="toggle-row">
+                <div>
+                  <div class="toggle-label-title">앱 내장 자동 미러링 타이머</div>
+                  <div class="toggle-label-sub">앱이 실행(또는 트레이 상주) 중일 때 지정 주기로 신규 CL을 감지·Push합니다.</div>
+                </div>
+                <label class="switch">
+                  <input id="chkP4AutoMirror" type="checkbox" />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+
+              <div class="form-grid" style="margin-top:12px;">
+                <div class="field">
+                  <label>미러링 주기 (분)</label>
+                  <input id="numP4Interval" type="number" min="1" max="60" class="input mono" value="2" />
+                </div>
+                <div class="field">
+                  <label>에셋 1줄 로그 경로 (Git 상대경로)</label>
+                  <input id="txtAssetLogPath" class="input mono" value=".p4-sync/asset_changelog.md" />
+                </div>
+              </div>
+
+              <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;">
+                <button id="btnMirrorNow" class="btn btn-success trigger-btn">▶ 지금 1회 미러링 실행</button>
+                <button id="btnMirrorDryRun" class="btn local-only">미리보기 (DryRun)</button>
+                <button id="btnMirrorInitWm" class="btn local-only">현재 HEAD로 워터마크 초기화</button>
+              </div>
+
+              <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-subtle);">
+                <button id="btnRegMirrorTask" class="btn btn-sm btn-violet local-only">Windows 작업 스케줄러 등록 (앱 꺼져도 동작)</button>
+                <button id="btnUnregMirrorTask" class="btn btn-sm btn-danger local-only">스케줄러 해제</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Asset Changelog Feed & Recent P4 CLs -->
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🎨 최근 에셋 Submit 1줄 요약 로그</div>
+                  <div class="card-desc">아티스트의 에셋 Submit 시 GitHub에 자동 기록되어 잔디 + 쿠킹 검증을 트리거합니다.</div>
+                </div>
+                <button id="btnRefreshMirrorFeed" class="btn btn-sm">↻ 갱신</button>
+              </div>
+              <div id="assetLogFeed" class="feed-list">
+                <div class="empty-state">아직 기록된 에셋 변경 로그가 없습니다.</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">📋 최근 Perforce Submitted CL</div>
+                  <div class="card-desc">로컬 P4 서버의 최근 제출 목록 (클릭 시 해당 CL로 빌드 동기화 가능)</div>
+                </div>
+                <button id="btnRefreshP4CLs" class="btn btn-sm">↻ CL 조회</button>
+              </div>
+              <div id="recentCLFeed" class="feed-list">
+                <div class="empty-state">Perforce 서버 연결 후 [CL 조회]를 눌러 확인하세요.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Author Map & Nightly Backup -->
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">👤 팀원 P4 ID ↔ GitHub 이메일 매핑 (author_map.json)</div>
+                  <div class="card-desc">P4 계정 이메일이 GitHub 등록 이메일과 다를 때 등록하면 잔디가 정확히 찍힙니다.</div>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <button id="btnAddAuthorRow" class="btn btn-sm local-only">+ 행 추가</button>
+                  <button id="btnSaveAuthorMap" class="btn btn-sm btn-primary local-only">매핑 저장</button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>P4 ID</th>
+                      <th>표시 이름</th>
+                      <th>GitHub 이메일</th>
+                      <th style="width:52px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="authorMapBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">💾 Perforce 정기 체크포인트 & 외부 백업</div>
+                  <div class="card-desc">단일 노트북 디스크 장애 대비 — 새벽 체크포인트 생성 후 외장/NAS 복제 + 구형 파일 자동 정리</div>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="field full">
+                  <label>P4 서버 디포 루트 (P4DepotRoot)</label>
+                  <div class="input-group">
+                    <input id="txtP4DepotRoot" class="input mono" />
+                    <button class="btn btn-sm pick-folder-btn local-only" data-target="txtP4DepotRoot">찾아보기</button>
+                  </div>
+                </div>
+                <div class="field full">
+                  <label>백업 대상 폴더 (외장 SSD / NAS 경로)</label>
+                  <div class="input-group">
+                    <input id="txtP4BackupRoot" class="input mono" />
+                    <button class="btn btn-sm pick-folder-btn local-only" data-target="txtP4BackupRoot">찾아보기</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>체크포인트 보관 개수</label>
+                  <input id="numRetainCheckpoints" type="number" min="1" max="60" class="input mono" value="7" />
+                </div>
+                <div class="field">
+                  <label>새벽 백업 시각 / 관리자 ID</label>
+                  <div class="input-group">
+                    <input id="txtBackupTime" class="input mono" value="04:00" style="width:90px; flex:none;" />
+                    <input id="txtBackupAdmin" class="input mono" value="admin" placeholder="admin" />
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;">
+                <button id="btnRunBackupNow" class="btn btn-primary local-only">지금 즉시 백업 실행</button>
+                <button id="btnRegBackupTask" class="btn btn-violet local-only">매일 새벽 백업 스케줄러 등록</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 4: GITHUB & RUNNER ==================== -->
+        <section id="view-github" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">GitHub 저장소 · Actions 워크플로우 · Self-Hosted Runner</h1>
+              <p class="page-subtitle">GitHub 로그인, P4 하이브리드 / Git 워크플로우 원클릭 배포, 로컬 Runner 제어</p>
+            </div>
+            <button id="btnOpenRepoPicker" class="btn btn-violet local-only">▶ GitHub 로그인 & 저장소 선택</button>
+          </div>
+
+          <div class="grid-2">
+            <!-- Connected Repo & Workflow -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🐙 연결된 GitHub 저장소 & 워크플로우</div>
+                  <div id="ghRepoSummary" class="card-desc">연결된 저장소가 없습니다.</div>
+                </div>
+                <button id="btnOpenGhWeb" class="btn btn-sm local-only">Actions 웹 열기 ↗</button>
+              </div>
+
+              <div class="form-grid">
+                <div class="field">
+                  <label>대상 브랜치</label>
+                  <div class="input-group">
+                    <select id="selBranch" class="select"></select>
+                    <button id="btnRefreshBranches" class="btn btn-sm local-only">↻</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>배포할 워크플로우 템플릿</label>
+                  <select id="selWorkflowTemplate" class="select">
+                    <option value="perforce">Perforce 하이브리드 (github_workflow_p4_build.yml)</option>
+                    <option value="git">Git 단독 모드 (github_workflow_build.yml)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="wfStatusLine" class="feed-item" style="margin-top:12px;">워크플로우 상태: 저장소 연결 후 스캔하세요.</div>
+
+              <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">
+                <button id="btnScanWorkflow" class="btn local-only">워크플로우 & Actions 스캔</button>
+                <button id="btnPushWorkflow" class="btn btn-primary local-only">★ 선택 브랜치에 build.yml 원클릭 등록</button>
+                <button id="btnPreviewWorkflow" class="btn btn-sm local-only">YAML 미리보기</button>
+              </div>
+            </div>
+
+            <!-- Self-Hosted Runner Control -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">⚡ Self-Hosted Runner 원클릭 제어</div>
+                  <div class="card-desc">노트북에서 GitHub Push 신호를 즉시 받아 로컬 P4(localhost:1666)로 초고속 패키징합니다.</div>
+                </div>
+                <span id="runnerDetailBadge" class="badge badge-slate">확인 중</span>
+              </div>
+
+              <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px;">
+                <button id="btnRunnerDownload" class="btn local-only">[1] Runner 다운로드 & 설치</button>
+                <button id="btnRunnerRegister" class="btn btn-violet local-only">[2] 저장소에 Runner 자동 등록</button>
+                <button id="btnRunnerStart" class="btn btn-success local-only">▶ Runner 가동 시작</button>
+                <button id="btnRunnerStop" class="btn btn-danger local-only">■ Runner 중지</button>
+              </div>
+
+              <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                <div>
+                  <div style="font-size:12.5px; font-weight:600;">팀원(Collaborator) 보조 모드: API 자동 감지 폴러</div>
+                  <div style="font-size:11.5px; color:var(--text-muted);">저장소 Admin 권한이 없을 때만 사용 (공식 Runner와 중복 실행 방지)</div>
+                </div>
+                <button id="btnTogglePoller" class="btn btn-sm local-only">폴러 가동</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Initial PC Setup & Recent Runs -->
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🛠 전용 PC 초기 폴더 구축 & 스크립트 배치</div>
+                  <div class="card-desc"><code>C:\BuildSystem\Scripts</code>에 최신 빌드·미러링·Discord·백업 스크립트와 런처 빌더를 일괄 배치합니다.</div>
+                </div>
+              </div>
+              <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                <button id="btnInitDirs" class="btn btn-primary local-only">[1] 필수 폴더 & 스크립트 일괄 배치</button>
+                <button id="btnCloneRepo" class="btn local-only">[2] 연결된 GitHub 저장소 최초 Clone</button>
+                <button id="btnLinkAssets" class="btn local-only">[Git 전용] .gitignore 에셋 정션 연결</button>
+              </div>
+              <div id="assetJunctionList" class="feed-list" style="margin-top:12px;"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">🚀 최근 GitHub Actions 실행 이력</div>
+                  <div class="card-desc">연결된 저장소의 최근 워크플로우 실행 상태</div>
+                </div>
+              </div>
+              <div id="recentRunsList" class="feed-list">
+                <div class="empty-state">[워크플로우 & Actions 스캔]을 누르면 최근 실행 이력이 표시됩니다.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 5: HISTORY ==================== -->
+        <section id="view-history" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">빌드 히스토리 & 전수 로그</h1>
+              <p class="page-subtitle">C:\BuildArchive\Logs에 보관된 모든 빌드 결과와 에러 요약을 바로 열람할 수 있습니다.</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <input id="txtHistSearch" class="input" style="width:230px;" placeholder="빌드 ID, CL, 작성자 검색..." />
+              <button id="btnRefreshHistory" class="btn">↻ 새로고침</button>
+            </div>
+          </div>
+
+          <div class="chip-group" id="histFilterChips">
+            <button class="chip active" data-filter="all">전체</button>
+            <button class="chip" data-filter="FullPackage">FullPackage</button>
+            <button class="chip" data-filter="QuickVerify">QuickVerify</button>
+            <button class="chip" data-filter="error">에러 발생만</button>
+          </div>
+
+          <div class="card" style="padding:0; overflow:hidden;">
+            <div class="table-wrap" style="border:none; border-radius:0;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>빌드 일시 / ID</th>
+                    <th>모드</th>
+                    <th>버전 / CL</th>
+                    <th>작성자</th>
+                    <th>상태</th>
+                    <th style="text-align:right;">로그 열람</th>
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                  <tr><td colspan="6" class="empty-state">빌드 히스토리가 없습니다.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 6: SETTINGS & NOTIFICATIONS ==================== -->
+        <section id="view-settings" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">알림 · 네트워크 · 경로 설정</h1>
+              <p class="page-subtitle">Discord Webhook, Slack Bot, Tailscale 원격 웹 대시보드 및 엔진 경로를 한곳에서 관리합니다.</p>
+            </div>
+            <button id="btnSaveAllSettings" class="btn btn-primary local-only">✔ 모든 설정 저장</button>
+          </div>
+
+          <div class="grid-2">
+            <!-- Discord Webhook -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">💬 Discord Webhook 알림</div>
+                  <div class="card-desc">성공/실패 Embed 카드 + 실패 시 핵심 에러 발췌 & 원본 <code>.log</code>(8MB 초과 시 자동 <code>.zip</code>) 첨부</div>
+                </div>
+                <button id="btnTestDiscord" class="btn btn-sm btn-violet local-only">테스트 전송</button>
+              </div>
+              <div class="toggle-row" style="margin-bottom:12px;">
+                <div>
+                  <div class="toggle-label-title">빌드 완료/실패 시 Discord 자동 전송</div>
+                  <div class="toggle-label-sub">Slack과 동시 사용 가능</div>
+                </div>
+                <label class="switch">
+                  <input id="chkAutoDiscord" type="checkbox" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+              <div class="field">
+                <label>Discord Webhook URL</label>
+                <input id="txtDiscordWebhook" type="password" class="input mono" placeholder="https://discord.com/api/webhooks/..." />
+              </div>
+            </div>
+
+            <!-- Slack Bot -->
+            <div class="card">
+              <div class="card-header">
+                <div>
+                  <div class="card-title">📣 Slack Bot 알림</div>
+                  <div class="card-desc">기존 BuildServerKit Slack 연동(에러 코드블록 + 원본 로그 파일 업로드) 완전 호환</div>
+                </div>
+                <button id="btnTestSlack" class="btn btn-sm btn-primary local-only">테스트 전송</button>
+              </div>
+              <div class="toggle-row" style="margin-bottom:12px;">
+                <div>
+                  <div class="toggle-label-title">빌드 완료/실패 시 Slack 자동 전송</div>
+                  <div class="toggle-label-sub">토큰과 채널 ID가 입력되어 있을 때 발송됩니다.</div>
+                </div>
+                <label class="switch">
+                  <input id="chkAutoSlack" type="checkbox" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label>Slack Bot Token (xoxb-...)</label>
+                  <input id="txtSlackToken" type="password" class="input mono" />
+                </div>
+                <div class="field">
+                  <label>Slack 채널 ID</label>
+                  <input id="txtSlackChannel" class="input mono" placeholder="C0123456789" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tailscale & Remote Web Dashboard -->
+          <div class="card featured">
+            <div class="card-header">
+              <div>
+                <div class="card-title">🌐 Tailscale 네트워크 & 팀원용 원격 웹 대시보드</div>
+                <div class="card-desc">원격 데스크톱 없이 팀원들이 브라우저로 실시간 빌드 콘솔·에러·패키징 보관함을 바로 확인할 수 있습니다.</div>
+              </div>
+              <button id="btnDetectIp" class="btn btn-sm local-only">Tailscale IP 자동 감지</button>
+            </div>
+
+            <div class="form-grid">
+              <div class="field">
+                <label>전용 노트북 Tailscale / 고정 IP</label>
+                <input id="txtTailscaleIp" class="input mono" placeholder="100.x.y.z (비워두면 자동 감지)" />
+                <span id="smbPreviewHint" class="field-hint">공유폴더 주소: \\IP\BuildArchive</span>
+              </div>
+              <div class="field">
+                <label>원격 웹 대시보드 포트</label>
+                <input id="numWebPort" type="number" min="1024" max="65535" class="input mono" value="3780" />
+              </div>
+            </div>
+
+            <div class="grid-2" style="margin-top:12px;">
+              <div class="toggle-row">
+                <div>
+                  <div class="toggle-label-title">원격 웹 대시보드 활성화</div>
+                  <div class="toggle-label-sub">켜면 내장 HTTP/SSE 서버가 즉시 가동됩니다.</div>
+                </div>
+                <label class="switch">
+                  <input id="chkWebEnabled" type="checkbox" />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+              <div class="toggle-row">
+                <div>
+                  <div class="toggle-label-title">팀원 읽기 전용 모드 (권장)</div>
+                  <div class="toggle-label-sub">끄면 팀원이 웹에서 빠른 검증/패키징을 원격 트리거할 수 있습니다. (토큰/설정은 항상 보호)</div>
+                </div>
+                <label class="switch">
+                  <input id="chkWebReadOnly" type="checkbox" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div id="webUrlBox" class="feed-item" style="margin-top:12px; display:flex; align-items:center; justify-content:space-between;">
+              <span id="lblWebUrl">원격 웹 대시보드 꺼짐</span>
+              <button id="btnCopyWebUrl" class="btn btn-sm">주소 복사</button>
+            </div>
+          </div>
+
+          <!-- Local Paths -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">📁 로컬 엔진 · 워크스페이스 · 아카이브 경로</div>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label>Unreal Engine 설치 경로 (UE5Root)</label>
+                <div class="input-group">
+                  <input id="txtUE5Root" class="input mono" />
+                  <button class="btn btn-sm pick-folder-btn local-only" data-target="txtUE5Root">찾아보기</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>빌드 대상 프로젝트 폴더 (ProjectDir)</label>
+                <div class="input-group">
+                  <input id="txtProjectDir" class="input mono" placeholder="P4 빌드 워크스페이스 또는 Git 클론 폴더" />
+                  <button class="btn btn-sm pick-folder-btn local-only" data-target="txtProjectDir">찾아보기</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>아카이브 루트 (Logs / Packages)</label>
+                <div class="input-group">
+                  <input id="txtArchiveRoot" class="input mono" />
+                  <button class="btn btn-sm pick-folder-btn local-only" data-target="txtArchiveRoot">찾아보기</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>GitHub Runner 폴더</label>
+                <div class="input-group">
+                  <input id="txtRunnerDir" class="input mono" />
+                  <button class="btn btn-sm pick-folder-btn local-only" data-target="txtRunnerDir">찾아보기</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Git 워크스페이스 상위 폴더</label>
+                <div class="input-group">
+                  <input id="txtWorkspaceRoot" class="input mono" />
+                  <button class="btn btn-sm pick-folder-btn local-only" data-target="txtWorkspaceRoot">찾아보기</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Git 제외 에셋 원본 폴더 (Git 단독 모드용)</label>
+                <div class="input-group">
+                  <input id="txtSharedAssetsDir" class="input mono" />
+                  <button class="btn btn-sm pick-folder-btn local-only" data-target="txtSharedAssetsDir">찾아보기</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Danger Zone -->
+          <div class="card danger-zone">
+            <div class="card-header" style="margin-bottom:0;">
+              <div>
+                <div class="card-title" style="color:#fda4af;">🧹 배포용 전체 데이터 초기화 (Factory Reset)</div>
+                <div class="card-desc">다른 팀이나 PC로 배포하기 전에 모든 GitHub/Slack/Discord 토큰과 개인 경로를 깨끗하게 삭제합니다.</div>
+              </div>
+              <button id="btnFactoryReset" class="btn btn-danger local-only">전체 초기화 실행</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Modal 1: GitHub Login & Repo Picker -->
+  <div id="modalRepo" class="modal-backdrop">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div>
+          <div class="card-title">🐙 GitHub 로그인 & 저장소 선택</div>
+          <div class="card-desc">Personal Access Token(repo, workflow, read:org) 또는 GitHub CLI(gh)로 즉시 연결합니다.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm close-modal" data-modal="modalRepo">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+          <button id="btnOpenPatPage" class="btn btn-sm btn-violet">1. GitHub 토큰 발급 페이지 열기 ↗</button>
+          <button id="btnUseGhCli" class="btn btn-sm">★ GitHub CLI(gh) 토큰 자동 가져오기</button>
+        </div>
+        <div class="input-group" style="margin-bottom:14px;">
+          <input id="txtModalGhToken" type="password" class="input mono" placeholder="ghp_... 또는 github_pat_..." />
+          <button id="btnModalLoadRepos" class="btn btn-primary">2. 저장소 불러오기</button>
+        </div>
+        <input id="txtRepoSearch" class="input" style="margin-bottom:10px;" placeholder="저장소 이름 검색..." />
+        <div id="modalRepoList" style="max-height:310px; overflow-y:auto;">
+          <div class="empty-state">토큰 입력 후 [저장소 불러오기]를 클릭하세요.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn close-modal" data-modal="modalRepo">취소</button>
+        <button id="btnConfirmRepo" class="btn btn-primary" disabled>✔ 선택한 저장소 연결</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: In-App Log / YAML Viewer -->
+  <div id="modalViewer" class="modal-backdrop">
+    <div class="modal-dialog" style="max-width:920px;">
+      <div class="modal-header">
+        <div id="modalViewerTitle" class="card-title">로그 뷰어</div>
+        <div style="display:flex; gap:6px;">
+          <button id="btnViewerCopy" class="btn btn-sm">전체 복사</button>
+          <button class="btn btn-ghost btn-sm close-modal" data-modal="modalViewer">✕</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <pre id="modalViewerContent" class="code-preview"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: First-Run & On-Demand Setup Wizard -->
+  <div id="modalWizard" class="modal-backdrop">
+    <div class="modal-dialog wizard-dialog">
+      <div class="modal-header">
+        <div>
+          <div class="card-title">✨ BuildServerKit 초기 설정 마법사 &amp; PC 환경 자동 진단</div>
+          <div class="card-desc">이 PC에 설치된 필수 요소를 자동 검사하고, 부족한 프로그램 안내부터 파이프라인 연결까지 한 번에 마칩니다.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm close-modal" data-modal="modalWizard">✕</button>
+      </div>
+
+      <div class="wizard-stepper" id="wizardStepper">
+        <button class="wiz-step-btn active" data-step="1"><span class="wiz-step-num">1</span><span>PC 필수 진단</span></button>
+        <button class="wiz-step-btn" data-step="2"><span class="wiz-step-num">2</span><span>엔진 · 폴더 · 보관</span></button>
+        <button class="wiz-step-btn" data-step="3"><span class="wiz-step-num">3</span><span>GitHub &amp; Runner</span></button>
+        <button class="wiz-step-btn" data-step="4"><span class="wiz-step-num">4</span><span>Perforce / 에셋</span></button>
+        <button class="wiz-step-btn" data-step="5"><span class="wiz-step-num">5</span><span>알림 &amp; 완료</span></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- STEP 1: Pipeline Mode & Live PC Diagnostics -->
+        <div id="wizPane1" class="wizard-step-pane active">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              <span style="font-weight:700; font-size:13px;">운영 방식 선택:</span>
+              <div class="segmented" id="wizVcsSegmented">
+                <button data-mode="PerforceHybrid" class="active">Perforce 하이브리드 (권장)</button>
+                <button data-mode="Git">Git 단독 모드</button>
+              </div>
+            </div>
+            <button id="btnWizRescan" class="btn btn-sm btn-primary">↻ PC 환경 다시 검사</button>
+          </div>
+
+          <div id="wizDiagSummary" class="diag-summary-banner">
+            <span>🔍 이 PC의 Unreal Engine 5, MSVC C++, Git, Perforce, Tailscale 설치 상태를 검사하는 중...</span>
+          </div>
+
+          <div id="wizDiagList" class="diag-list"></div>
+        </div>
+
+        <!-- STEP 2: Engine Path, Initial Folders & Package Retention -->
+        <div id="wizPane2" class="wizard-step-pane">
+          <div class="card" style="padding:14px 16px;">
+            <div class="card-title" style="margin-bottom:10px;">1) Unreal Engine 5 경로 &amp; 아카이브 폴더</div>
+            <div class="form-grid">
+              <div class="field full">
+                <label>자동 감지된 Unreal Engine 5 선택 (없으면 아래에 직접 지정)</label>
+                <select id="wizSelUE5" class="select"></select>
+              </div>
+              <div class="field full">
+                <label>Unreal Engine 5 실제 경로 (RunUAT.bat 포함 폴더)</label>
+                <div class="input-group">
+                  <input id="wizUE5Root" class="input mono" placeholder="C:\Program Files\Epic Games\UE_5.x" />
+                  <button class="btn btn-sm pick-folder-btn" data-target="wizUE5Root">찾아보기</button>
+                </div>
+              </div>
+              <div class="field full">
+                <label>빌드 로그 · 패키징 결과물 보관함 (ArchiveRoot)</label>
+                <div class="input-group">
+                  <input id="wizArchiveRoot" class="input mono" value="C:\BuildArchive" />
+                  <button class="btn btn-sm pick-folder-btn" data-target="wizArchiveRoot">찾아보기</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="padding:14px 16px;">
+            <div class="card-header" style="margin-bottom:10px;">
+              <div>
+                <div class="card-title">2) 패키징 보관 개수 제한 (디스크 자동 관리)</div>
+                <div class="card-desc">새 패키징 성공 시 지정 개수만 남기고 오래된 패키징 폴더부터 자동 정리합니다.</div>
+              </div>
+            </div>
+            <div class="toggle-row">
+              <div>
+                <div class="toggle-label-title">오래된 패키징 자동 정리 사용</div>
+                <div class="toggle-label-sub">기본값: 최신 10개 유지 (나중에 [패키징 &amp; 보관 관리] 탭에서 언제든 변경 가능)</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:12px;">
+                <input id="wizMaxPkgs" type="number" min="1" max="200" value="10" class="input mono" style="width:74px; text-align:center;" />
+                <label class="switch">
+                  <input id="wizEnableRetain" type="checkbox" checked />
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+              <div class="card-title">3) 전용 PC 필수 폴더 &amp; 전체 스크립트 일괄 배치</div>
+              <div class="card-desc"><code>C:\BuildSystem\Scripts</code>, <code>C:\BuildArchive</code>, <code>C:\actions-runner</code>를 한 번에 생성하고 스크립트를 복사합니다.</div>
+            </div>
+            <button id="btnWizInitDirs" class="btn btn-success">🛠 지금 폴더 &amp; 스크립트 배치</button>
+          </div>
+        </div>
+
+        <!-- STEP 3: GitHub Repo, Workflow & Runner -->
+        <div id="wizPane3" class="wizard-step-pane">
+          <div class="card" style="padding:14px 16px;">
+            <div class="card-header" style="margin-bottom:8px;">
+              <div>
+                <div class="card-title">1) GitHub 로그인 &amp; 저장소 연결</div>
+                <div id="wizGhStatus" class="card-desc">현재 연결된 저장소가 없습니다.</div>
+              </div>
+              <button id="btnWizConnectGh" class="btn btn-violet">▶ GitHub 로그인 &amp; 저장소 선택</button>
+            </div>
+          </div>
+
+          <div class="card" style="padding:14px 16px;">
+            <div class="card-header" style="margin-bottom:8px;">
+              <div>
+                <div class="card-title">2) GitHub Actions 워크플로우(<code>.github/workflows/build.yml</code>) 자동 등록</div>
+                <div id="wizWfDesc" class="card-desc">선택한 모드(Perforce 하이브리드)에 맞는 build.yml을 원클릭으로 저장소에 Push합니다.</div>
+              </div>
+              <button id="btnWizPushWf" class="btn btn-primary">★ build.yml 자동 등록</button>
+            </div>
+          </div>
+
+          <div class="card" style="padding:14px 16px;">
+            <div class="card-header" style="margin-bottom:10px;">
+              <div>
+                <div class="card-title">3) Self-Hosted Runner 설치 · 등록 · 가동</div>
+                <div class="card-desc">포트포워딩 없이 GitHub Push 신호를 이 PC에서 즉시 받아 빌드합니다.</div>
+              </div>
+              <span id="wizRunnerBadge" class="badge badge-slate">미설치</span>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="btnWizDlRunner" class="btn">[1] Runner 다운로드</button>
+              <button id="btnWizRegRunner" class="btn btn-violet">[2] 저장소에 자동 등록</button>
+              <button id="btnWizStartRunner" class="btn btn-success">[3] ▶ Runner 가동 시작</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 4: Perforce Hybrid OR Git Asset Junction -->
+        <div id="wizPane4" class="wizard-step-pane">
+          <!-- Sub-pane for Perforce Hybrid -->
+          <div id="wizP4Box" style="display:flex; flex-direction:column; gap:12px;">
+            <div class="card" style="padding:14px 16px;">
+              <div class="card-header" style="margin-bottom:10px;">
+                <div>
+                  <div class="card-title">Perforce 연결 &amp; 자동화 계정 (Read-Only <code>p4bot</code> 권장)</div>
+                  <div class="card-desc">팀원 4인 이하라면 5번째 계정으로 <code>p4bot</code>(Read-Only)을 쓰고, 5인 팀이라면 관리자 계정 ID를 입력하세요.</div>
+                </div>
+                <button id="btnWizP4Test" class="btn btn-sm btn-violet">연결 &amp; 티켓 진단</button>
+              </div>
+              <div class="form-grid">
+                <div class="field">
+                  <label>P4PORT</label>
+                  <input id="wizP4Port" class="input mono" placeholder="localhost:1666" />
+                </div>
+                <div class="field">
+                  <label>P4USER</label>
+                  <input id="wizP4User" class="input mono" placeholder="p4bot" />
+                </div>
+                <div class="field full">
+                  <label>P4Stream</label>
+                  <input id="wizP4Stream" class="input mono" placeholder="//MyProject/main" />
+                </div>
+                <div class="field">
+                  <label>빌드 전용 워크스페이스 (코드+에셋 전체)</label>
+                  <input id="wizP4BuildClient" class="input mono" placeholder="ws-build-full" />
+                </div>
+                <div class="field">
+                  <label>미러 전용 워크스페이스 (코드/설정만)</label>
+                  <input id="wizP4MirrorClient" class="input mono" placeholder="ws-mirror-code" />
+                </div>
+              </div>
+              <div id="wizP4DiagOut" class="feed-item" style="margin-top:10px; display:none;"></div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                <button id="btnWizCloneMirror" class="btn">[1] 미러 Git 저장소 최초 Clone</button>
+                <button id="btnWizInitWm" class="btn">[2] 현재 HEAD로 워터마크 초기화</button>
+                <button id="btnWizRegMirrorTask" class="btn btn-primary">[3] 자동 미러링 작업 스케줄러 등록</button>
+              </div>
+            </div>
+
+            <div class="card" style="padding:14px 16px;">
+              <div class="card-header" style="margin-bottom:6px;">
+                <div class="card-title">📋 신규 PC Perforce 서버 초기 명령어 빠른 참조</div>
+                <button id="btnWizCopyP4Guide" class="btn btn-sm">명령어 복사</button>
+              </div>
+              <div id="wizP4Cheat" class="wiz-cheatsheet"># 1) 한글 Unicode 활성화 (최초 1회)
+net stop Perforce && p4d -r "C:\Perforce\Server" -xi && net start Perforce
+p4 set P4PORT=localhost:1666 && p4 set P4CHARSET=utf8
+
+# 2) Read-Only 봇(p4bot) + 무기한 티켓
+p4 -u admin user -f p4bot
+p4 -u admin group automation_bots   # Timeout: unlimited, Users: p4bot
+p4 -u admin protect                 # 하단 추가: read group automation_bots * //...
+p4 -p localhost:1666 -u p4bot login</div>
+            </div>
+          </div>
+
+          <!-- Sub-pane for Git-Only Mode -->
+          <div id="wizGitBox" style="display:none; flex-direction:column; gap:12px;">
+            <div class="card" style="padding:14px 16px;">
+              <div class="card-title" style="margin-bottom:8px;">Git 단독 모드: 저장소 클론 &amp; 제외 에셋 정션 연결</div>
+              <div class="card-desc" style="margin-bottom:12px;">Git 용량 제한으로 <code>.gitignore</code>에 제외해 둔 <code>Content/...</code> 폴더를 <code>SharedAssets</code> 원본과 심볼릭 링크로 연결합니다.</div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button id="btnWizGitClone" class="btn btn-primary">[1] 연결된 저장소 최초 Clone</button>
+                <button id="btnWizGitAssets" class="btn btn-success">[2] .gitignore 제외 에셋 심볼릭 링크 연결</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 5: Notifications, Remote Dashboard & Finish -->
+        <div id="wizPane5" class="wizard-step-pane">
+          <div class="grid-2">
+            <div class="card" style="padding:14px 16px;">
+              <div class="card-header" style="margin-bottom:8px;">
+                <div class="card-title">💬 Discord Webhook (선택)</div>
+                <button id="btnWizTestDiscord" class="btn btn-sm btn-violet">테스트</button>
+              </div>
+              <input id="wizDiscordUrl" type="password" class="input mono" placeholder="https://discord.com/api/webhooks/..." />
+            </div>
+
+            <div class="card" style="padding:14px 16px;">
+              <div class="card-header" style="margin-bottom:8px;">
+                <div class="card-title">📣 Slack Bot (선택)</div>
+                <button id="btnWizTestSlack" class="btn btn-sm btn-primary">테스트</button>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <input id="wizSlackToken" type="password" class="input mono" placeholder="Slack Bot Token (xoxb-...)" />
+                <input id="wizSlackChannel" class="input mono" placeholder="채널 ID (C0123456789)" />
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="padding:14px 16px;">
+            <div class="card-header" style="margin-bottom:10px;">
+              <div>
+                <div class="card-title">🌐 Tailscale IP &amp; 팀원용 원격 웹 대시보드</div>
+                <div class="card-desc">팀원들이 브라우저에서 실시간 빌드 상태와 콘솔을 열람할 수 있습니다. (기본 읽기 전용)</div>
+              </div>
+              <button id="btnWizDetectIp" class="btn btn-sm">IP 자동 감지</button>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label>Tailscale / 고정 IP</label>
+                <input id="wizTailscaleIp" class="input mono" placeholder="100.x.y.z" />
+              </div>
+              <div class="field">
+                <label>원격 웹 대시보드 (포트 3780)</label>
+                <div class="toggle-row" style="padding:7px 12px;">
+                  <span style="font-size:12.5px; font-weight:600;">원격 웹 대시보드 켜기</span>
+                  <label class="switch">
+                    <input id="wizWebEnabled" type="checkbox" />
+                    <span class="switch-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="diag-summary-banner ok" id="wizFinalBanner">
+            <span>🎉 설정이 준비되었습니다! <strong>[설정 완료하고 시작하기]</strong>를 누르면 대시보드로 이동합니다. (좌측 하단 [✨ 설정 마법사] 버튼으로 언제든 다시 열 수 있습니다.)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="wizard-footer-bar">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button id="btnWizSkip" class="btn btn-ghost btn-sm">나중에 하기 (닫기)</button>
+            <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); cursor:pointer;">
+              <input id="chkWizDontAutoOpen" type="checkbox" />
+              <span>다음 실행부터 자동 표시 안 함</span>
+            </label>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button id="btnWizPrev" class="btn" disabled>← 이전</button>
+            <button id="btnWizNext" class="btn btn-primary">다음 단계 →</button>
+            <button id="btnWizFinish" class="btn btn-success" style="display:none;">✔ 설정 완료하고 시작하기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="./transport.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

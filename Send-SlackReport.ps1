@@ -58,13 +58,14 @@ if ([string]::IsNullOrWhiteSpace($SlackBotToken) -or [string]::IsNullOrWhiteSpac
 }
 
 $ModeLabel = if ($BuildMode -eq "QuickVerify") { "빠른 컴파일·쿠킹 검증" } else { "전체 패키징 빌드" }
+$RefLabel  = if ($CommitHash -match '^CL(\d+)$') { "CL #$($Matches[1])" } else { $CommitHash }
 $SharedLogPath = $LogArchiveDir -replace '^[A-Za-z]:\\BuildArchive', "\\$TailscaleIP\BuildArchive"
 
 # ==============================================================================
 # 1. 성공 시 알림 전송
 # ==============================================================================
 if ($ExitCode -eq 0) {
-    $SuccessText = "*[$ProjectName 빌드 성공]* ($ModeLabel 완료)`n- *브랜치/커밋:* ``$BranchName`` (``$CommitHash``) by *$CommitAuthor*`n- *커밋 메시지:* $CommitMsg`n- *소요 시간:* $Duration`n- *로그/결과물 공유폴더:* ``$SharedLogPath``"
+    $SuccessText = "*[$ProjectName 빌드 성공]* ($ModeLabel 완료)`n- *브랜치/버전:* ``$BranchName`` (``$RefLabel``) by *$CommitAuthor*`n- *변경 내용:* $CommitMsg`n- *소요 시간:* $Duration`n- *로그/결과물 공유폴더:* ``$SharedLogPath``"
     $Body = @{ channel = $SlackChannelId; text = $SuccessText } | ConvertTo-Json -Compress
     Invoke-RestMethod -Uri "https://slack.com/api/chat.postMessage" -Method Post `
         -Headers @{ Authorization = "Bearer $SlackBotToken"; "Content-Type" = "application/json; charset=utf-8" } `
@@ -93,9 +94,9 @@ if ([string]::IsNullOrWhiteSpace($ErrorSnippet) -and (Test-Path $UATLogFile)) {
 
 $FailMessage = @"
 *[$ProjectName 빌드/패키징 실패]* ($ModeLabel)
-- *브랜치 / 커밋:* ``$BranchName`` (``$CommitHash``)
+- *브랜치 / 버전:* ``$BranchName`` (``$RefLabel``)
 - *작성자:* *$CommitAuthor*
-- *커밋 메시지:* $CommitMsg
+- *변경 내용:* $CommitMsg
 - *소요 시간:* $Duration (ExitCode: $ExitCode)
 - *전체 로그 공유폴더:* ``$SharedLogPath``
 

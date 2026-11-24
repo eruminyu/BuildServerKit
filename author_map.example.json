@@ -1,0 +1,11 @@
+{
+  "_comment": "Perforce 사용자 ID와 GitHub 이메일이 다를 때만 여기에 등록하세요. (미등록 유저는 'p4 user -o'의 FullName/Email을 자동 사용)",
+  "admin": {
+    "name": "Lead Developer",
+    "email": "lead@example.com"
+  },
+  "artist_kim": {
+    "name": "Kim Artist",
+    "email": "artist.kim@example.com"
+  }
+}

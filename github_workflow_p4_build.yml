@@ -1,0 +1,177 @@
+name: Unreal Engine Build & Package (Perforce Hybrid)
+
+on:
+  push:
+    branches:
+      - 'main'
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: '실행할 빌드 모드 (QuickVerify: 빠른 컴파일·쿠킹 검증 / FullPackage: 전체 .pak 패키징)'
+        required: true
+        default: 'FullPackage'
+        type: choice
+        options:
+          - QuickVerify
+          - FullPackage
+      target_cl:
+        description: '동기화할 Perforce CL 번호 (비워두면 P4 최신 #head 자동 조회)'
+        required: false
+        default: ''
+        type: string
+      client_config:
+        description: '클라이언트 빌드 구성 (Auto: 빌드매니저 설정값 사용)'
+        required: false
+        default: 'Auto'
+        type: choice
+        options:
+          - Auto
+          - Development
+          - Shipping
+          - DebugGame
+  # [선택사항] 야간 자동 패키징이 필요할 때 아래 2줄의 주석(#)을 해제하세요.
+  # (이전 야간 패키징 이후 새 CL이 없을 경우 자동으로 건너뛰어 SSD를 보호합니다.)
+  # schedule:
+  #   - cron: '0 18 * * *' # 매일 새벽 03:00 KST (UTC 18:00)
+
+# 일반 QuickVerify 도중 새 Submit이 들어오면 이전 검증을 취소하고 최신 CL만 빌드합니다.
+# 단, 수동 실행 / 야간 패키징 / [package] 태그가 포함된 전체 패키징은 끝까지 보장합니다.
+concurrency:
+  group: ue-p4-hybrid-build
+  cancel-in-progress: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, '[package]') && !contains(github.event.head_commit.message, '[release]') }}
+
+jobs:
+  ue-p4-build:
+    name: UE5 P4 Build (${{ github.event_name }})
+    runs-on: self-hosted
+
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      TAILSCALE_IP: ${{ vars.TAILSCALE_IP }}
+
+    steps:
+      - name: 1. Perforce CL 파싱 및 로컬 P4 초고속 동기화 (코드 + 대용량 에셋)
+        id: p4sync
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $env:P4CHARSET = "utf8"
+
+          $ConfigPath = "C:\BuildSystem\Scripts\build_manager_config.json"
+          $Cfg = if (Test-Path $ConfigPath) { Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+
+          $P4Port   = if ($Cfg -and $Cfg.P4Port)        { $Cfg.P4Port }        else { "localhost:1666" }
+          $P4User   = if ($Cfg -and $Cfg.P4User)        { $Cfg.P4User }        else { "p4bot" }
+          $P4Client = if ($Cfg -and $Cfg.P4BuildClient) { $Cfg.P4BuildClient } else { "ws-build-full" }
+          $P4Stream = if ($Cfg -and $Cfg.P4Stream)      { $Cfg.P4Stream.TrimEnd('/') } else { "//MyProject/main" }
+
+          $EventName   = "${{ github.event_name }}"
+          $HeadMsg     = @'
+          ${{ github.event.head_commit.message }}
+          '@.Trim()
+          $HeadAuthor  = "${{ github.event.head_commit.author.name }}"
+          $InputCL     = "${{ inputs.target_cl }}".Trim()
+          $TargetCL    = ""
+
+          if ($EventName -eq "workflow_dispatch" -and $InputCL -match '^\d+$') {
+              $TargetCL = $InputCL
+          } elseif ($EventName -eq "push" -and $HeadMsg -match '\[CL #(\d+)\]') {
+              $TargetCL = $Matches[1]
+          } else {
+              # 수동 실행(CL 미지정) 또는 야간 스케줄: P4 스트림의 실제 최신 Submitted CL 조회
+              $HeadOut = & p4 -p $P4Port -u $P4User -ztag changes -s submitted -m 1 "$P4Stream/..."
+              foreach ($Line in $HeadOut) {
+                  if ($Line -match '^\.\.\.\s+change\s+(\d+)$') { $TargetCL = $Matches[1]; break }
+              }
+          }
+
+          if ([string]::IsNullOrWhiteSpace($TargetCL)) {
+              Write-Error "동기화할 Perforce CL 번호를 결정할 수 없습니다."
+              exit 1
+          }
+
+          # 야간 스케줄 실행 시 이전 야간 패키징 이후 새 CL이 없으면 자동 스킵
+          $StateDir = "C:\BuildSystem\Scripts\.p4_state"
+          if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Force -Path $StateDir | Out-Null }
+          $NightlyWmFile = Join-Path $StateDir "last_nightly_packaged_cl.txt"
+          if ($EventName -eq "schedule" -and (Test-Path $NightlyWmFile)) {
+              $LastNightly = (Get-Content $NightlyWmFile -Raw -ErrorAction SilentlyContinue).Trim()
+              if ($LastNightly -eq $TargetCL) {
+                  Write-Host "[야간 빌드 스킵] 이전 패키징(CL #$LastNightly) 이후 새 변경사항이 없습니다." -ForegroundColor Yellow
+                  "skip_build=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+                  exit 0
+              }
+          }
+
+          # 빌드 모드 결정 (Perforce 단일 main 스트림에서는 일반 Push = QuickVerify로 SSD 보호)
+          if ($EventName -eq "workflow_dispatch") {
+              $Mode = "${{ inputs.build_mode }}"
+          } elseif ($EventName -eq "schedule") {
+              $Mode = "FullPackage"
+          } elseif ($HeadMsg -match '\[(package|release)\]') {
+              $Mode = "FullPackage"
+          } else {
+              $Mode = "QuickVerify"
+          }
+
+          # P4 빌드 워크스페이스 루트 자동 조회
+          $ClientRoot = ""
+          $ClientInfo = & p4 -p $P4Port -u $P4User -ztag client -o $P4Client
+          foreach ($Line in $ClientInfo) {
+              if ($Line -match '^\.\.\.\s+Root\s+(.+)$') { $ClientRoot = $Matches[1].Trim(); break }
+          }
+          if ([string]::IsNullOrWhiteSpace($ClientRoot) -and $Cfg -and $Cfg.ProjectDir) {
+              $ClientRoot = $Cfg.ProjectDir
+          }
+
+          Write-Host "=== Perforce 로컬 동기화 시작: CL #$TargetCL ($P4Port / $P4Client -> $ClientRoot) ===" -ForegroundColor Cyan
+          & p4 -p $P4Port -u $P4User -c $P4Client sync "//...@$TargetCL"
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "Perforce 동기화 실패 (CL #$TargetCL)"
+              exit $LASTEXITCODE
+          }
+
+          $FirstMsgLine = ($HeadMsg -split "`r?`n")[0].Trim()
+          if ([string]::IsNullOrWhiteSpace($FirstMsgLine)) { $FirstMsgLine = "CL #$TargetCL build" }
+
+          "skip_build=false"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "target_cl=$TargetCL"           | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "build_mode=$Mode"              | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "project_dir=$ClientRoot"       | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "commit_author=$HeadAuthor"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "commit_msg=$FirstMsgLine"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: 2. UE5 빌드·쿠킹·패키징 실행 (Run-UEBuild.ps1 -> 보관 개수 정리 + Slack/Discord 리포트)
+        if: steps.p4sync.outputs.skip_build != 'true'
+        shell: powershell
+        run: |
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          $Mode       = "${{ steps.p4sync.outputs.build_mode }}"
+          $TargetCL   = "${{ steps.p4sync.outputs.target_cl }}"
+          $ProjectDir = "${{ steps.p4sync.outputs.project_dir }}"
+          $Author     = "${{ steps.p4sync.outputs.commit_author }}"
+          $Msg        = "${{ steps.p4sync.outputs.commit_msg }}"
+          $ClientCfg  = "${{ inputs.client_config }}"
+          if ($ClientCfg -eq "Auto") { $ClientCfg = "" }
+
+          Write-Host "실행 모드: $Mode / CL: #$TargetCL / 경로: $ProjectDir" -ForegroundColor Cyan
+          & "C:\BuildSystem\Scripts\Run-UEBuild.ps1" `
+              -VcsMode "PerforceHybrid" `
+              -Changelist $TargetCL `
+              -BuildMode $Mode `
+              -BranchName "${{ github.ref_name }}" `
+              -ClientConfig $ClientCfg `
+              -ProjectDir $ProjectDir `
+              -CommitAuthor $Author `
+              -CommitMsg $Msg
+
+          if ($LASTEXITCODE -eq 0 -and "${{ github.event_name }}" -eq "schedule") {
+              Set-Content -Path "C:\BuildSystem\Scripts\.p4_state\last_nightly_packaged_cl.txt" -Value $TargetCL -Encoding Ascii
+          }
+          exit $LASTEXITCODE
