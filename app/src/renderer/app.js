@@ -1165,6 +1165,14 @@
     listEl.innerHTML = (report.checks || [])
       .map((c) => {
         const showActions = c.status === 'missing' || c.status === 'warn';
+        const applyUserBtn =
+          showActions && c.applyP4User
+            ? `<button class="btn btn-sm btn-success wiz-apply-p4user" data-user="${escapeHtml(c.applyP4User)}">✔ ${escapeHtml(c.applyP4User)} 계정 적용</button>`
+            : '';
+        const jumpBtn =
+          showActions && c.jumpToStep
+            ? `<button class="btn btn-sm wiz-jump-step" data-step="${c.jumpToStep}">${c.jumpToStep}단계 설정 →</button>`
+            : '';
         const wingetBtn =
           showActions && c.wingetKey
             ? `<button class="btn btn-sm btn-primary wiz-winget-btn" data-pkg="${escapeHtml(c.wingetKey)}">⚡ winget 설치</button>`
@@ -1183,11 +1191,29 @@
             </div>
             <div class="diag-card-detail">${escapeHtml(c.detail)}</div>
           </div>
-          <div class="diag-card-actions">${wingetBtn}${dlBtn}</div>
+          <div class="diag-card-actions">${applyUserBtn}${jumpBtn}${wingetBtn}${dlBtn}</div>
         </div>`;
       })
       .join('');
 
+    listEl.querySelectorAll('.wiz-apply-p4user').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const u = btn.dataset.user;
+        const saved = await safeCall(() => api.invoke('config:save', { P4User: u }), `P4USER를 '${u}' 계정으로 적용했습니다!`);
+        if (saved) {
+          cfg = saved;
+          hydrateConfigToUI();
+          syncWizardFieldsFromConfig();
+          await runWizardDiagnostics();
+        }
+      });
+    });
+    listEl.querySelectorAll('.wiz-jump-step').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await saveWizardProgress();
+        setWizardStep(Number(btn.dataset.step));
+      });
+    });
     listEl.querySelectorAll('.wiz-dl-btn').forEach((btn) => {
       btn.addEventListener('click', () => api.invoke('system:openExternal', btn.dataset.url));
     });

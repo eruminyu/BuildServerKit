@@ -158,14 +158,32 @@ async function detectPerforce(cfg) {
   let serverReachable = false;
   let unicodeMode = false;
   let ticketOk = false;
+  let activeSystemUser = '';
+  let activeSystemTicketOk = false;
+  const configuredUser = cfg.P4User || 'p4bot';
+  const port = cfg.P4Port || 'localhost:1666';
+
   if (cliInstalled) {
-    const base = ['-p', cfg.P4Port || 'localhost:1666', '-u', cfg.P4User || 'p4bot'];
-    const info = await execCapture('p4', [...base, 'info'], { timeoutMs: 5000 });
+    // Use `p4 -ztag info` without forcing -u so we get BOTH exact `... unicode enabled` AND default OS P4USER
+    const info = await execCapture('p4', ['-p', port, '-ztag', 'info'], { timeoutMs: 5000 });
     if (info.code === 0) {
       serverReachable = true;
-      unicodeMode = /unicode enabled/i.test(info.stdout || '');
-      const login = await execCapture('p4', [...base, 'login', '-s'], { timeoutMs: 4000 });
+      for (const line of (info.stdout || '').split(/\r?\n/)) {
+        const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s+(.*)$/);
+        if (!m) continue;
+        const [, key, val] = m;
+        if (key === 'unicode' && val.trim().toLowerCase() === 'enabled') unicodeMode = true;
+        if (key === 'userName') activeSystemUser = val.trim();
+      }
+
+      const login = await execCapture('p4', ['-p', port, '-u', configuredUser, 'login', '-s'], { timeoutMs: 4000 });
       ticketOk = login.code === 0;
+
+      // If configured user (e.g. p4bot) has no ticket yet, check if the PC's current default P4USER is logged in
+      if (!ticketOk && activeSystemUser && activeSystemUser.toLowerCase() !== configuredUser.toLowerCase()) {
+        const sysLogin = await execCapture('p4', ['-p', port, '-u', activeSystemUser, 'login', '-s'], { timeoutMs: 4000 });
+        activeSystemTicketOk = sysLogin.code === 0;
+      }
     }
   }
 
@@ -178,6 +196,9 @@ async function detectPerforce(cfg) {
     serverReachable,
     unicodeMode,
     ticketOk,
+    configuredUser,
+    activeSystemUser,
+    activeSystemTicketOk,
   };
 }
 
@@ -327,26 +348,45 @@ async function runFullDiagnostics(configStore, modeOverride = '') {
       : isP4
         ? 'missing'
         : 'optional';
+
+  let p4Summary = 'Git 모드에선 불필요';
+  let p4Detail = '노트북 올인원 구성 시 Windows용 Helix Core Server(P4D)를 설치하세요. (원격 P4 서버를 쓴다면 4단계에서 P4PORT만 변경)';
+  if (p4.serverReachable) {
+    const ticketTxt = p4.ticketOk
+      ? `티켓:유효 (${p4.configuredUser})`
+      : p4.activeSystemTicketOk
+        ? `설정계정(${p4.configuredUser}) 미로그인 · PC 로그인됨(${p4.activeSystemUser})`
+        : `티켓:필요 (${p4.configuredUser})`;
+    p4Summary = `연결됨 (${cfg.P4Port}) · Unicode:${p4.unicodeMode ? 'ON' : 'OFF'} · ${ticketTxt}`;
+
+    if (p4.unicodeMode && p4.ticketOk) {
+      p4Detail = `로컬 Perforce 서버, Unicode 모드, 자동화 계정(${p4.configuredUser}) 티켓이 모두 준비되었습니다.`;
+    } else if (!p4.unicodeMode) {
+      p4Detail = '한글 깨짐 방지를 위해 Unicode 모드(p4d -xi) 활성화를 권장합니다.';
+    } else if (p4.activeSystemTicketOk) {
+      p4Detail = `현재 PC에는 '${p4.activeSystemUser}' 계정으로 로그인되어 있습니다. 그대로 쓰려면 우측 [${p4.activeSystemUser} 계정 적용]을 누르거나, 4단계 안내대로 Read-Only '${p4.configuredUser}' 계정을 생성하세요.`;
+    } else {
+      p4Detail = `서버 연결은 정상입니다! 4단계에서 자동화 계정(${p4.configuredUser})을 만들거나 현재 로그인한 계정으로 P4USER를 맞춰주세요.`;
+    }
+  } else if (p4.serviceInstalled) {
+    p4Summary = `서비스(${p4.serviceName}) 감지됨 — ${p4.serviceRunning ? '연결 확인 필요' : '중지됨'}`;
+  } else if (isP4) {
+    p4Summary = '로컬 P4D 서버 미감지';
+  }
+
   checks.push({
     id: 'p4d',
     category: 'vcs',
     name: 'Helix Core Server (P4D) 및 연결',
     required: isP4,
     status: p4dStatus,
-    summary: p4.serverReachable
-      ? `연결됨 (${cfg.P4Port}) · Unicode:${p4.unicodeMode ? 'ON' : 'OFF'} · 티켓:${p4.ticketOk ? '유효' : '필요'}`
-      : p4.serviceInstalled
-        ? `서비스(${p4.serviceName}) 감지됨 — ${p4.serviceRunning ? '연결 확인 필요' : '중지됨'}`
-        : isP4
-          ? '로컬 P4D 서버 미감지'
-          : 'Git 모드에선 불필요',
-    detail: p4.serverReachable
-      ? p4.unicodeMode && p4.ticketOk
-        ? '로컬 Perforce 서버, Unicode 모드, 자동화 계정 티켓이 모두 준비되었습니다.'
-        : 'Unicode 모드(p4d -xi) 또는 자동화 계정(p4bot) 로그인 티켓을 4단계에서 마무리하세요.'
-      : '노트북 올인원 구성 시 Windows용 Helix Core Server(P4D)를 설치하세요. (원격 P4 서버를 쓴다면 4단계에서 P4PORT만 변경)',
-    downloadUrl: 'https://www.perforce.com/downloads/helix-core-p4d',
-    downloadLabel: 'Helix Core(P4D) 다운로드',
+    summary: p4Summary,
+    detail: p4Detail,
+    // Do NOT show P4D download button when server is already reachable!
+    downloadUrl: p4.serverReachable ? '' : 'https://www.perforce.com/downloads/helix-core-p4d',
+    downloadLabel: p4.serverReachable ? '' : 'Helix Core(P4D) 다운로드',
+    applyP4User: p4.serverReachable && !p4.ticketOk && p4.activeSystemTicketOk ? p4.activeSystemUser : '',
+    jumpToStep: p4.serverReachable && p4dStatus === 'warn' ? 4 : 0,
   });
 
   // 7. Tailscale VPN (Recommended)

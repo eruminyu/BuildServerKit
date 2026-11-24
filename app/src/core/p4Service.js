@@ -19,16 +19,19 @@ class P4Service {
     const cfg = this.configStore.get();
     const base = this._p4BaseArgs(cfg);
 
-    const info = await execCapture('p4', [...base, 'info'], { timeoutMs: 8000 });
+    const info = await execCapture('p4', [...base, '-ztag', 'info'], { timeoutMs: 8000 });
     const login = await execCapture('p4', [...base, 'login', '-s'], { timeoutMs: 8000 });
 
     let serverVersion = '';
     let serverAddress = '';
     let unicodeMode = false;
     for (const line of (info.stdout || '').split(/\r?\n/)) {
-      if (line.startsWith('Server version:')) serverVersion = line.replace('Server version:', '').trim();
-      if (line.startsWith('Server address:')) serverAddress = line.replace('Server address:', '').trim();
-      if (line.toLowerCase().includes('unicode enabled')) unicodeMode = true;
+      const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s+(.*)$/);
+      if (!m) continue;
+      const [, key, val] = m;
+      if (key === 'serverVersion') serverVersion = val.trim();
+      else if (key === 'serverAddress') serverAddress = val.trim();
+      else if (key === 'unicode' && val.trim().toLowerCase() === 'enabled') unicodeMode = true;
     }
 
     let buildRoot = '';

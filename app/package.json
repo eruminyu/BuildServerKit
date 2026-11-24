@@ -1,7 +1,7 @@
 {
   "name": "buildserverkit-studio",
   "productName": "BuildServerKit Studio",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "BuildServerKit",
   "description": "UE5 Perforce Hybrid & GitHub Actions All-in-One Build Server Manager (Electron + Tailscale Remote Dashboard)",
   "main": "src/main.js",
