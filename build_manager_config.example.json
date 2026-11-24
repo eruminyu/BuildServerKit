@@ -43,5 +43,6 @@
   "TailscaleIP": "",
   "RemoteWebDashboardEnabled": false,
   "RemoteWebDashboardPort": 3780,
-  "RemoteWebDashboardReadOnly": true
+  "RemoteWebDashboardReadOnly": true,
+  "MinimizeToTrayOnClose": true
 }

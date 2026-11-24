@@ -25,6 +25,7 @@ const { runFullDiagnostics, installViaWinget } = require('./core/diagnosticsServ
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+let trayNoticeShown = false;
 
 const kitDir = app.isPackaged ? path.join(process.resourcesPath, 'kit') : path.resolve(__dirname, '..', '..');
 const rendererDir = path.join(__dirname, 'renderer');
@@ -51,27 +52,45 @@ if (!gotLock) {
   });
 }
 
-function createTrayIcon() {
+function createTrayIcon(forTray = false) {
   const iconPng = path.join(__dirname, 'assets', 'icon.png');
   if (fs.existsSync(iconPng)) {
-    return nativeImage.createFromPath(iconPng);
+    const img = nativeImage.createFromPath(iconPng);
+    return forTray ? img.resize({ width: 32, height: 32 }) : img;
   }
   return nativeImage.createEmpty();
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function hideToTrayWithNotice() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.hide();
+  if (tray && !trayNoticeShown && typeof tray.displayBalloon === 'function') {
+    trayNoticeShown = true;
+    try {
+      tray.displayBalloon({
+        iconType: 'info',
+        title: 'BuildServerKit Studio',
+        content: '시스템 트레이에서 백그라운드로 계속 실행 중입니다. 트레이 아이콘을 클릭하면 다시 열립니다.',
+      });
+    } catch {}
+  }
+}
+
 function setupTray() {
   try {
-    tray = new Tray(createTrayIcon());
-    tray.setToolTip('BuildServerKit Studio — UE5 Build & Perforce Manager');
+    tray = new Tray(createTrayIcon(true));
+    tray.setToolTip('BuildServerKit Studio — 클릭하여 창 열기 (우클릭: 완전 종료)');
     const menu = Menu.buildFromTemplate([
       {
         label: 'BuildServerKit Studio 열기',
-        click: () => {
-          if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-          }
-        },
+        click: () => showMainWindow(),
       },
       { type: 'separator' },
       {
@@ -96,12 +115,8 @@ function setupTray() {
       },
     ]);
     tray.setContextMenu(menu);
-    tray.on('double-click', () => {
-      if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    });
+    tray.on('click', () => showMainWindow());
+    tray.on('double-click', () => showMainWindow());
   } catch {}
 }
 
@@ -143,13 +158,9 @@ function createMainWindow() {
   });
 
   mainWindow.on('close', (e) => {
-    if (!isQuitting && tray) {
-      // If Runner, Auto-Mirror, or Web Dashboard is active, hide to tray cleanly
-      const st = stateHub.state;
-      if (st.runner.running || st.runner.apiPolling || st.mirror.autoEnabled || st.webServer.running) {
-        e.preventDefault();
-        mainWindow.hide();
-      }
+    if (!isQuitting && tray && configStore.get().MinimizeToTrayOnClose !== false) {
+      e.preventDefault();
+      hideToTrayWithNotice();
     }
   });
 }
@@ -163,10 +174,14 @@ function registerIpcHandlers() {
     else mainWindow.maximize();
     return mainWindow.isMaximized();
   });
-  ipcMain.handle('window:hideToTray', () => mainWindow && mainWindow.hide());
+  ipcMain.handle('window:hideToTray', () => hideToTrayWithNotice());
   ipcMain.handle('window:close', () => {
-    isQuitting = true;
-    app.quit();
+    if (tray && configStore.get().MinimizeToTrayOnClose !== false) {
+      hideToTrayWithNotice();
+    } else {
+      isQuitting = true;
+      app.quit();
+    }
   });
 
   // Config & System

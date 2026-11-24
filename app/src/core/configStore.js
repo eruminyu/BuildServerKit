@@ -53,6 +53,7 @@ const DEFAULT_CONFIG = {
   RemoteWebDashboardEnabled: false,
   RemoteWebDashboardPort: 3780,
   RemoteWebDashboardReadOnly: true,
+  MinimizeToTrayOnClose: true,
 };
 
 const SCRIPTS_DIR = 'C:\\BuildSystem\\Scripts';
@@ -105,6 +106,7 @@ class ConfigStore {
   _normalize(cfg) {
     const out = { ...DEFAULT_CONFIG, ...cfg };
     out.SetupCompleted = Boolean(out.SetupCompleted);
+    out.MinimizeToTrayOnClose = out.MinimizeToTrayOnClose !== false;
     const maxPkgs = Number(out.MaxRetainedPackages);
     out.MaxRetainedPackages = Number.isFinite(maxPkgs) && maxPkgs >= 1 ? Math.min(200, Math.round(maxPkgs)) : 10;
     out.EnablePackageRetention = Boolean(out.EnablePackageRetention);

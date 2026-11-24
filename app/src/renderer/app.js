@@ -197,6 +197,7 @@
     $('numWebPort').value = cfg.RemoteWebDashboardPort || 3780;
     $('chkWebEnabled').checked = Boolean(cfg.RemoteWebDashboardEnabled);
     $('chkWebReadOnly').checked = cfg.RemoteWebDashboardReadOnly !== false;
+    if ($('chkMinimizeToTray')) $('chkMinimizeToTray').checked = cfg.MinimizeToTrayOnClose !== false;
     $('txtUE5Root').value = cfg.UE5Root || '';
     $('txtProjectDir').value = cfg.ProjectDir || '';
     $('txtArchiveRoot').value = cfg.ArchiveRoot || '';
@@ -257,6 +258,7 @@
       RemoteWebDashboardPort: Number($('numWebPort').value) || 3780,
       RemoteWebDashboardEnabled: $('chkWebEnabled').checked,
       RemoteWebDashboardReadOnly: $('chkWebReadOnly').checked,
+      MinimizeToTrayOnClose: $('chkMinimizeToTray') ? $('chkMinimizeToTray').checked : true,
       UE5Root: $('txtUE5Root').value.trim(),
       ProjectDir: $('txtProjectDir').value.trim(),
       ArchiveRoot: $('txtArchiveRoot').value.trim(),
@@ -1002,6 +1004,7 @@
   $('btnSaveAllSettings').addEventListener('click', () => saveCurrentConfig(true));
   $('chkWebEnabled').addEventListener('change', () => saveCurrentConfig(true));
   $('chkWebReadOnly').addEventListener('change', () => saveCurrentConfig(true));
+  $('chkMinimizeToTray')?.addEventListener('change', () => saveCurrentConfig(true));
   $('btnTestDiscord').addEventListener('click', async () => {
     await saveCurrentConfig(false);
     const r = await safeCall(() => api.invoke('notify:testDiscord'));
