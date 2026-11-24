@@ -1306,6 +1306,8 @@
   // ---------------------------------------------------------------------------
   let teamP4State = { connected: false, users: [], userCount: 0, workspaceCount: 0, activeSystemUser: '', noAutoCreateLocked: false };
   let lastLookedUpGh = null;
+  let editingExistingP4Id = '';
+  let lastAutoFilledP4Id = '';
 
   function clearTeamForm() {
     $('txtTeamGhUrl').value = '';
@@ -1314,6 +1316,8 @@
     $('txtTeamEmail').value = '';
     $('txtTeamPasswd').value = '';
     lastLookedUpGh = null;
+    editingExistingP4Id = '';
+    lastAutoFilledP4Id = '';
     $('teamGhPreview').classList.remove('visible');
   }
 
@@ -1512,6 +1516,8 @@
       btn.addEventListener('click', () => {
         const row = rows.find((x) => x.p4User === btn.dataset.id);
         if (!row) return;
+        editingExistingP4Id = row.p4User;
+        lastAutoFilledP4Id = '';
         $('txtTeamP4Id').value = row.p4User;
         $('txtTeamName').value = row.mapName || row.p4Name || row.p4User;
         $('txtTeamEmail').value = row.mapEmail || row.p4Email || '';
@@ -1603,14 +1609,26 @@
     if (!profile) return;
 
     showGhPreviewCard(profile);
-    // Keep existing P4 ID if user is editing an existing account (e.g. p4murmur); otherwise suggest GitHub login
-    if (!$('txtTeamP4Id').value.trim()) {
+    // Preserve existing P4 ID ONLY when explicitly editing a selected existing account (e.g. p4murmur).
+    // When switching GitHub link A -> B in add mode (or after saving A), always update P4 ID to B!
+    const curP4Id = $('txtTeamP4Id').value.trim();
+    const isLockedToExisting = editingExistingP4Id && curP4Id.toLowerCase() === editingExistingP4Id.toLowerCase();
+    if (!isLockedToExisting && (!curP4Id || curP4Id === lastAutoFilledP4Id || !editingExistingP4Id)) {
       $('txtTeamP4Id').value = profile.login;
+      lastAutoFilledP4Id = profile.login;
     }
     $('txtTeamName').value = profile.name || profile.login;
     $('txtTeamEmail').value = profile.email || profile.noreplyEmail;
     toast(`GitHub 프로필(@${profile.login}) 정보를 불러왔습니다!`, 'success');
   }
+
+  $('txtTeamP4Id')?.addEventListener('input', () => {
+    const v = $('txtTeamP4Id').value.trim();
+    if (!v) {
+      editingExistingP4Id = '';
+      lastAutoFilledP4Id = '';
+    }
+  });
 
   $('btnTeamRefresh')?.addEventListener('click', refreshTeamTab);
   $('btnTeamClearForm')?.addEventListener('click', clearTeamForm);
@@ -1651,6 +1669,8 @@
     const saved = await safeCall(() => api.invoke('config:authorMap:save', authorMapRows), `'${p4User}' 잔디 매핑 저장 완료!`);
     if (saved) {
       authorMapRows = saved;
+      editingExistingP4Id = '';
+      lastAutoFilledP4Id = p4User;
       renderAuthorMap();
       renderTeamRoster();
     }
@@ -1682,6 +1702,8 @@
       authorMapRows = saved;
       renderAuthorMap();
     }
+    editingExistingP4Id = '';
+    lastAutoFilledP4Id = p4User;
     $('txtTeamPasswd').value = '';
     toast(`${p4Res.message} + 잔디 매핑 저장 완료!`, 'success');
     await refreshTeamTab();
