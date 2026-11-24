@@ -88,12 +88,45 @@ Set-Content -Path $LockFile -Value $PID -Encoding Ascii
 
 function Invoke-P4 {
     param([string[]]$P4Args)
-    $FullArgs = @("-p", $P4Port, "-u", $P4User) + $P4Args
-    $Out = & p4 @FullArgs 2>&1
-    $Code = $LASTEXITCODE
-    return [PSCustomObject]@{
-        ExitCode = $Code
-        Lines    = @($Out | ForEach-Object { $_.ToString() })
+    $PrevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $FullArgs = @("-p", $P4Port, "-u", $P4User) + $P4Args
+        $Out = & p4 @FullArgs 2>&1
+        $Code = $LASTEXITCODE
+        $Lines = @()
+        if ($null -ne $Out) {
+            $Lines = @($Out | Where-Object { $null -ne $_ } | ForEach-Object { $_.ToString() })
+        }
+        return [PSCustomObject]@{
+            ExitCode = $Code
+            Lines    = $Lines
+        }
+    } finally {
+        $ErrorActionPreference = $PrevEap
+    }
+}
+
+function Invoke-Git {
+    param([string[]]$GitArgs)
+    $PrevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $FullArgs = @("-c", "safe.directory=*", "-c", "core.quotepath=false") + $GitArgs
+        $Out = & git @FullArgs 2>&1
+        $Code = $LASTEXITCODE
+        $Lines = @()
+        if ($null -ne $Out) {
+            $Lines = @($Out | Where-Object { $null -ne $_ } | ForEach-Object {
+                ($_.ToString() -replace 'x-access-token:[^@\s]+@', 'x-access-token:***@')
+            })
+        }
+        return [PSCustomObject]@{
+            ExitCode = $Code
+            Lines    = $Lines
+        }
+    } finally {
+        $ErrorActionPreference = $PrevEap
     }
 }
 
@@ -274,14 +307,15 @@ try {
     if (-not $DryRun) {
         if ($Cfg -and $Cfg.GitHubAccessToken -and $Cfg.GitRemoteUrl -and $Cfg.GitRemoteUrl.StartsWith("https://github.com/")) {
             $AuthUrl = $Cfg.GitRemoteUrl -replace '^https://github\.com/', "https://x-access-token:$($Cfg.GitHubAccessToken)@github.com/"
-            & git -c safe.directory=* remote set-url origin $AuthUrl 2>$null
+            [void](Invoke-Git @("remote", "set-url", "origin", $AuthUrl))
         }
-        & git -c safe.directory=* fetch origin $GitBranch 2>$null
-        $CurrBranch = (& git -c safe.directory=* rev-parse --abbrev-ref HEAD 2>$null).Trim()
+        [void](Invoke-Git @("fetch", "origin", $GitBranch))
+        $BrRes = Invoke-Git @("rev-parse", "--abbrev-ref", "HEAD")
+        $CurrBranch = ($BrRes.Lines -join "").Trim()
         if ($CurrBranch -ne $GitBranch) {
-            & git -c safe.directory=* checkout $GitBranch 2>$null
+            [void](Invoke-Git @("checkout", $GitBranch))
         }
-        & git -c safe.directory=* pull --rebase --autostash origin $GitBranch 2>$null
+        [void](Invoke-Git @("pull", "--rebase", "--autostash", "origin", $GitBranch))
     }
 
     $AssetExtRegex = '\.(uasset|umap|fbx|obj|png|jpg|jpeg|tga|psd|exr|hdr|wav|mp3|ogg|mp4|mov|blend|max|ma|mb|spp|uexp|ubulk)$'
@@ -353,9 +387,12 @@ try {
 
         # P4 미러 클라이언트 루트와 Git 저장소 경로가 다르면 보호 복사 (.git, .github, .p4-sync 보호)
         if (-not $IsSameDir) {
+            $PrevEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
             & robocopy $NormClientRoot $NormMirrorDir /MIR /XD ".git" ".github" ".p4-sync" /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-            if ($LASTEXITCODE -ge 8) {
-                throw "robocopy 미러 복사 실패 (ExitCode=$LASTEXITCODE)"
+            $RoboCode = $LASTEXITCODE
+            $ErrorActionPreference = $PrevEap
+            if ($RoboCode -ge 8) {
+                throw "robocopy 미러 복사 실패 (ExitCode=$RoboCode)"
             }
         }
 
@@ -371,8 +408,9 @@ try {
         }
 
         Set-Location $NormMirrorDir
-        & git -c safe.directory=* -c core.quotepath=false add -A
-        $StatusOut = & git -c safe.directory=* -c core.quotepath=false status --porcelain
+        [void](Invoke-Git @("add", "-A"))
+        $StRes = Invoke-Git @("status", "--porcelain")
+        $StatusOut = $StRes.Lines
 
         if (-not [string]::IsNullOrWhiteSpace(($StatusOut -join ""))) {
             $MsgBody = "$CommitSubject`n`n$($Info.Desc)`n`nPerforce-CL: $CL`nPerforce-User: $($Info.User)"
@@ -387,9 +425,9 @@ try {
             $env:GIT_COMMITTER_DATE  = $GitIsoDate
 
             try {
-                & git -c safe.directory=* -c core.quotepath=false commit -F $TmpMsgFile
-                if ($LASTEXITCODE -ne 0) {
-                    throw "git commit 실패 (CL #$CL)"
+                $CommitRes = Invoke-Git @("commit", "-F", $TmpMsgFile)
+                if ($CommitRes.ExitCode -ne 0) {
+                    throw "git commit 실패 (CL #$CL): $($CommitRes.Lines -join ' ')"
                 }
                 $CommittedCount++
             } finally {
@@ -407,13 +445,13 @@ try {
     if (-not $DryRun) {
         if ($CommittedCount -gt 0) {
             Write-Host "[P4Mirror] 총 ${CommittedCount}개 커밋을 GitHub($GitBranch)로 Push 중..." -ForegroundColor Green
-            & git -c safe.directory=* push origin $GitBranch
-            if ($LASTEXITCODE -ne 0) {
+            $PushRes = Invoke-Git @("push", "origin", $GitBranch)
+            if ($PushRes.ExitCode -ne 0) {
                 Write-Warning "[P4Mirror] Push 충돌 감지 -> pull --rebase 후 재시도합니다..."
-                & git -c safe.directory=* pull --rebase origin $GitBranch
-                if ($LASTEXITCODE -ne 0) { throw "git pull --rebase 실패" }
-                & git -c safe.directory=* push origin $GitBranch
-                if ($LASTEXITCODE -ne 0) { throw "git push 재시도 실패" }
+                $PullRes = Invoke-Git @("pull", "--rebase", "origin", $GitBranch)
+                if ($PullRes.ExitCode -ne 0) { throw "git pull --rebase 실패: $($PullRes.Lines -join ' ')" }
+                $PushRes2 = Invoke-Git @("push", "origin", $GitBranch)
+                if ($PushRes2.ExitCode -ne 0) { throw "git push 재시도 실패: $($PushRes2.Lines -join ' ')" }
             }
         }
         # Push 성공 후에만 워터마크 갱신 (CL 유실 방지)

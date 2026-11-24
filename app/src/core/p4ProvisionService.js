@@ -42,7 +42,9 @@ Build/
 .vs/
 .vscode/
 .idea/
+.vsconfig
 *.sln
+*.slnx
 *.suo
 *.opensdf
 *.sdf

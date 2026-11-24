@@ -18,7 +18,7 @@ param(
     [switch]$SkipCheckpoint
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:P4CHARSET = "utf8"

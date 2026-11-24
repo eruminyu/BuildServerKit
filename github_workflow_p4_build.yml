@@ -61,8 +61,13 @@ jobs:
       - name: 1. Perforce CL 파싱 및 로컬 P4 초고속 동기화 (코드 + 대용량 에셋)
         id: p4sync
         shell: powershell
+        env:
+          HEAD_COMMIT_MSG: ${{ github.event.head_commit.message }}
+          HEAD_COMMIT_AUTHOR: ${{ github.event.head_commit.author.name }}
+          INPUT_TARGET_CL: ${{ inputs.target_cl }}
+          INPUT_BUILD_MODE: ${{ inputs.build_mode }}
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $env:P4CHARSET = "utf8"
@@ -76,11 +81,9 @@ jobs:
           $P4Stream = if ($Cfg -and $Cfg.P4Stream)      { $Cfg.P4Stream.TrimEnd('/') } else { "//MyProject/main" }
 
           $EventName   = "${{ github.event_name }}"
-          $HeadMsg     = @'
-          ${{ github.event.head_commit.message }}
-          '@.Trim()
-          $HeadAuthor  = "${{ github.event.head_commit.author.name }}"
-          $InputCL     = "${{ inputs.target_cl }}".Trim()
+          $HeadMsg     = if ($env:HEAD_COMMIT_MSG) { $env:HEAD_COMMIT_MSG.Trim() } else { "" }
+          $HeadAuthor  = if ($env:HEAD_COMMIT_AUTHOR) { $env:HEAD_COMMIT_AUTHOR.Trim() } else { "" }
+          $InputCL     = if ($env:INPUT_TARGET_CL) { $env:INPUT_TARGET_CL.Trim() } else { "" }
           $TargetCL    = ""
 
           if ($EventName -eq "workflow_dispatch" -and $InputCL -match '^\d+$') {
@@ -121,7 +124,7 @@ jobs:
 
           # 빌드 모드 결정 (Perforce 단일 main 스트림에서는 일반 Push = QuickVerify로 SSD 보호)
           if ($EventName -eq "workflow_dispatch") {
-              $Mode = "${{ inputs.build_mode }}"
+              $Mode = if ($env:INPUT_BUILD_MODE) { $env:INPUT_BUILD_MODE.Trim() } else { "FullPackage" }
           } elseif ($EventName -eq "schedule") {
               $Mode = "FullPackage"
           } elseif ($HeadMsg -match '\[(package|release)\]') {
@@ -160,17 +163,24 @@ jobs:
       - name: 2. UE5 빌드·쿠킹·패키징 실행 (Run-UEBuild.ps1 -> 보관 개수 정리 + Slack/Discord 리포트)
         if: steps.p4sync.outputs.skip_build != 'true'
         shell: powershell
+        env:
+          BUILD_MODE: ${{ steps.p4sync.outputs.build_mode }}
+          TARGET_CL: ${{ steps.p4sync.outputs.target_cl }}
+          PROJECT_DIR: ${{ steps.p4sync.outputs.project_dir }}
+          COMMIT_AUTHOR: ${{ steps.p4sync.outputs.commit_author }}
+          COMMIT_MSG: ${{ steps.p4sync.outputs.commit_msg }}
+          INPUT_CLIENT_CFG: ${{ inputs.client_config }}
         run: |
+          $ErrorActionPreference = "Continue"
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-          $Mode       = "${{ steps.p4sync.outputs.build_mode }}"
-          $TargetCL   = "${{ steps.p4sync.outputs.target_cl }}"
-          $ProjectDir = "${{ steps.p4sync.outputs.project_dir }}"
-          $Author     = "${{ steps.p4sync.outputs.commit_author }}"
-          $Msg        = "${{ steps.p4sync.outputs.commit_msg }}"
-          $ClientCfg  = "${{ inputs.client_config }}"
-          if ($ClientCfg -eq "Auto") { $ClientCfg = "" }
+          $Mode       = $env:BUILD_MODE
+          $TargetCL   = $env:TARGET_CL
+          $ProjectDir = $env:PROJECT_DIR
+          $Author     = $env:COMMIT_AUTHOR
+          $Msg        = $env:COMMIT_MSG
+          $ClientCfg  = if ($env:INPUT_CLIENT_CFG -eq "Auto") { "" } else { "$env:INPUT_CLIENT_CFG" }
 
           Write-Host "실행 모드: $Mode / CL: #$TargetCL / 경로: $ProjectDir" -ForegroundColor Cyan
           & "C:\BuildSystem\Scripts\Run-UEBuild.ps1" `
