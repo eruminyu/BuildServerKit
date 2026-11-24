@@ -21,7 +21,7 @@
             </svg>
           </div>
           <span>BuildServerKit Studio</span>
-          <span class="brand-version">v2.2.0</span>
+          <span class="brand-version">v2.3.0</span>
         </div>
         <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
       </div>
@@ -416,11 +416,12 @@
               <h1 class="page-title">Perforce 서버 & GitHub 코드·에셋 자동 미러링</h1>
               <p class="page-subtitle">GUI 원클릭 설치·초기 세팅 · Read-Only 전용 봇(p4bot) · 아티스트 에셋 Submit 1줄 로그 기록 · 새벽 정기 백업</p>
             </div>
-            <div style="display:flex; gap:8px; align-items:center;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
               <div class="segmented" id="vcsModeSegmented">
                 <button data-mode="PerforceHybrid" class="active">Perforce 하이브리드</button>
                 <button data-mode="Git">Git 단독 모드</button>
               </div>
+              <button id="btnOpenUeGen" class="btn btn-violet local-only">✨ 빈 UE5 프로젝트 생성</button>
               <button id="btnSaveP4Tab" class="btn btn-primary local-only">✔ P4 설정 저장</button>
             </div>
           </div>
@@ -1443,6 +1444,16 @@
               </div>
             </div>
 
+            <div class="card" style="padding:14px 16px;">
+              <div class="card-header" style="margin-bottom:6px;">
+                <div>
+                  <div class="card-title">③ [선택] 새 프로젝트라면 — 빈 UE5 프로젝트 원클릭 생성 &amp; P4 최초 Submit</div>
+                  <div class="card-desc">이 PC에 설치된 UE5 버전만 감지해 공식 <code>Blank (C++ / Blueprint)</code> 프로젝트 + <code>.p4ignore</code>를 생성하고, 원하면 Perforce에 <code>CL #1</code>까지 한 번에 올립니다. (이미 프로젝트가 있다면 건너뛰세요!)</div>
+                </div>
+                <button id="btnWizOpenUeGen" class="btn btn-sm btn-violet local-only">✨ 빈 프로젝트 생성기 열기 →</button>
+              </div>
+            </div>
+
             <div class="wiz-tip-box ok">
               <div class="wiz-tip-title">⚡ 자동 빌드 분기 조건 한눈에 보기</div>
               <ul class="wiz-tip-list">
@@ -1461,6 +1472,7 @@
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button id="btnWizGitClone" class="btn btn-primary">[1] 연결된 저장소 최초 Clone</button>
                 <button id="btnWizGitAssets" class="btn btn-success">[2] .gitignore 제외 에셋 심볼릭 링크 연결</button>
+                <button id="btnWizOpenUeGenGit" class="btn btn-violet local-only">✨ 빈 UE5 프로젝트 생성기 열기</button>
               </div>
             </div>
           </div>
@@ -1545,6 +1557,100 @@
             <button id="btnWizFinish" class="btn btn-success" style="display:none;">✔ 설정 완료하고 시작하기</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 4: Blank UE5 Project Generator (Installed Versions Only + Optional P4 CL #1 Submit) -->
+  <div id="modalUeProject" class="modal-backdrop">
+    <div class="modal-dialog" style="max-width:720px;">
+      <div class="modal-header">
+        <div>
+          <div class="card-title">✨ 빈 Unreal Engine 5 프로젝트 생성기 (설치된 버전 전용)</div>
+          <div class="card-desc">이 PC에 설치된 UE5 공식 <code>TP_Blank</code> / <code>TP_BlankBP</code> 템플릿으로 캐시 없는 정석 프로젝트를 생성하고, 선택 시 Perforce에 <code>CL #1</code>까지 한 번에 올립니다.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm close-modal" data-modal="modalUeProject">✕</button>
+      </div>
+
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:14px;">
+        <div class="form-grid">
+          <div class="field full">
+            <label>1) 설치된 Unreal Engine 5 버전 선택 (PC에 설치된 버전만 선택 가능)</label>
+            <div class="input-group">
+              <select id="selUeGenEngine" class="select"></select>
+              <button id="btnUeGenRescan" class="btn btn-sm">↻ 다시 스캔</button>
+            </div>
+            <span id="lblUeGenEngineHint" class="field-hint">설치된 UE5 엔진 폴더 내부의 공식 Blank 템플릿을 자동 사용합니다.</span>
+          </div>
+
+          <div class="field">
+            <label>2) 프로젝트 유형</label>
+            <div class="segmented" id="segUeGenType">
+              <button data-type="cpp" class="active">C++ (권장)</button>
+              <button data-type="bp">Blueprint</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>3) 프로젝트 이름 (영문 시작 · 2~20자)</label>
+            <input id="txtUeGenName" class="input mono" placeholder="예: Project_MurMur" maxlength="20" />
+            <span class="field-hint">영문·숫자·밑줄(<code>_</code>)만 허용 (한글/공백/하이픈 불가)</span>
+          </div>
+
+          <div class="field full">
+            <label>4) 생성할 프로젝트 폴더 경로</label>
+            <div class="input-group">
+              <input id="txtUeGenDir" class="input mono" placeholder="C:\BuildSystem\Workspace\MyProject" />
+              <button class="btn btn-sm pick-folder-btn" data-target="txtUeGenDir">찾아보기</button>
+            </div>
+            <span class="field-hint">⚠️ 비어 있는 새 폴더를 지정하세요. <code>P4ROOT</code> 서버 창고나 기존 프로젝트 폴더는 자동 차단됩니다.</span>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:14px; font-size:12.5px; color:var(--text-secondary);">
+          <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+            <input id="chkUeGenP4Ignore" type="checkbox" checked />
+            <span>표준 <code>.p4ignore</code> 포함 (<code>*.slnx</code>·<code>.vsconfig</code> 포함)</span>
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+            <input id="chkUeGenGitIgnore" type="checkbox" checked />
+            <span>표준 <code>.gitignore</code> 포함</span>
+          </label>
+          <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
+            <input id="chkUeGenSyncCfg" type="checkbox" checked />
+            <span>앱 설정(<code>UE5Root</code>·<code>ProjectDir</code>)에 자동 반영</span>
+          </label>
+        </div>
+
+        <div id="ueGenP4SubmitBox" class="card" style="padding:12px 14px; background:rgba(15,23,42,0.45);">
+          <div class="toggle-row" style="padding:0; border:none; background:transparent;">
+            <div>
+              <div class="toggle-label-title">🚀 생성 직후 Perforce에 최초 <code>CL #1</code> 자동 Submit + 빌드 워크스페이스 동기화</div>
+              <div class="toggle-label-sub">팀원들은 별도 수동 작업 없이 P4V에서 <strong>Get Latest</strong> 한 번이면 바로 시작할 수 있습니다. (이미 <code>.uproject</code>가 있는 스트림은 안전 중단 · 임시 워크스페이스 자동 삭제)</div>
+            </div>
+            <label class="switch">
+              <input id="chkUeGenP4Submit" type="checkbox" checked />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+          <div id="ueGenP4Fields" class="form-grid" style="margin-top:10px;">
+            <div class="field">
+              <label>Submit에 사용할 관리자 P4 ID (<code>super</code> 권한 · 로그인 필요)</label>
+              <input id="txtUeGenAdmin" class="input mono" placeholder="예: p4murmur" />
+            </div>
+            <div class="field">
+              <label>대상 Perforce Stream</label>
+              <input id="txtUeGenStream" class="input mono" placeholder="//MyProject/main" />
+            </div>
+          </div>
+        </div>
+
+        <div id="ueGenResultBox" class="wiz-tip-box ok" style="display:none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-ghost close-modal" data-modal="modalUeProject">닫기</button>
+        <button id="btnUeGenCreate" class="btn btn-primary btn-lg">✨ 빈 UE5 프로젝트 생성</button>
       </div>
     </div>
   </div>

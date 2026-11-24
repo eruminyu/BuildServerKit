@@ -1196,7 +1196,8 @@ tr:hover td {
 }
 
 /* ==================== SETUP WIZARD MODAL ==================== */
-#modalRepo {
+#modalRepo,
+#modalUeProject {
   z-index: 1200;
 }
 #modalViewer {

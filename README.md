@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛠️ BuildServerKit Studio `v2.2.0`
+# 🛠️ BuildServerKit Studio `v2.3.0`
 
 **여유 노트북(또는 전용 PC) 1대를 클릭 몇 번으로 Unreal Engine 5 올인원 빌드 서버로 만들어 주는 데스크톱 매니저**  
 *Perforce 하이브리드 자동 미러링 · GUI 원클릭 P4 서버 세팅 · GitHub Actions Self-Hosted Runner · 팀원 GitHub 프로필 연동 · 패키지 자동 보관 정리 · Discord/Slack 리포트 · Tailscale 원격 웹 대시보드*
@@ -64,6 +64,7 @@ flowchart LR
 ## ✨ 주요 기능
 
 * **✨ 최초 실행 5단계 설정 마법사 & PC 환경 자동 진단:** 새 PC에서 처음 실행하면 **UE5(`UE_5.*` 자동 탐지) · Visual Studio C++(MSVC) · Git · Perforce(CLI/P4D·Unicode·티켓) · Tailscale · RAM/SSD · Runner** 상태를 자동 진단하고, 단계별 주의사항 가이드와 원클릭 설치를 제공합니다.
+* **📦 빈 UE5 프로젝트 원클릭 생성기 + Perforce `CL #1` 자동 Submit (`v2.3.0` 신규!):** 사용자 PC에 **실제로 설치된 UE5 버전 목록 중에서만 선택**해 공식 `TP_Blank`(C++) / `TP_BlankBP`(Blueprint) 템플릿으로 캐시 0개 + `.p4ignore`/`.gitignore` 포함 정석 프로젝트를 생성하고, 원하면 관리자 계정으로 Perforce에 **`CL #1` 최초 Submit + `ws-build-full` 동기화**까지 한 번에 완료합니다 *(임시 워크스페이스 자동 삭제 · 기존 `.uproject` 덮어쓰기 차단)*.
 * **⚡ Perforce 서버 GUI 설치 & 원클릭 자동 세팅 (터미널 불필요):** `[Perforce & 미러링]` 탭에서 최신 공식 Helix Core Server(`P4D`) 자동 다운로드·설치, `winget` `Perforce.P4V` 설치, UAC Unicode 전환(`p4d -xi`), 방화벽 개방(`1666`/`3780`), GUI 관리자 로그인, 그리고 **Stream 디포 · UE5 Typemap(`+l`) · Read-Only `p4bot` 무기한 티켓 · 전용 워크스페이스 2개 · `.p4ignore`(`*.slnx`/`.vsconfig` 포함) 원클릭 일괄 구성**을 지원합니다.
 * **👥 팀원 & 계정 관리 탭 (GitHub 프로필 링크 자동 채우기):** 팀원의 GitHub 프로필 URL만 붙여넣으면 이름·아바타·잔디용 이메일(비공개 계정은 `{id}+{login}@users.noreply.github.com` 자동 생성)을 채워 **Perforce 계정 생성/수정(보안 정책 통과 비밀번호 자동생성 포함) + `author_map.json` 저장 + 팀원용 P4V 접속 가이드 복사**까지 한 번에 처리합니다.
 * **🔄 안정적인 Windows PowerShell 5.1 미러링 & Runner 실행:** 모든 `git`/`p4`/`robocopy` 호출의 stderr 오탐 방지, 워크플로우 `-ExecutionPolicy Bypass` 내장, 작업 스케줄러 등록 여부 실시간 배지 표시(**`SCHED`** / **`스케줄러 ON`**), 포터블 `.exe` 업그레이드 시 `C:\BuildSystem\Scripts\` 자동 스크립트 최신화를 지원합니다.
@@ -136,15 +137,17 @@ flowchart LR
 
 ---
 
-### 7단계: 작업 PC에서 UE5 프로젝트 최초 Submit → 첫 자동 빌드 확인
-1. 작업 PC에 **Tailscale** + **P4V** 설치 후 연결 (`<노트북_Tailscale_IP>:1666`, 본인 ID, 인코딩 **`UTF-8`**).
-2. P4V 워크스페이스 생성 시:
-   * **⚠️ `Stream:` 칸을 절대 비워두지 말고** **`Browse...` → `//프로젝트/main`** 선택! *(비워두면 모든 스트림이 하위 폴더로 꼬여 내려옵니다)*
-   * **`Advanced`** 탭 → **`Rmdir`** 체크 권장 *(삭제된 빈 폴더 자동 정리)*.
-3. 워크스페이스 Root **바로 아래**에 UE5 프로젝트(`*.uproject`, `Config/`, `Content/`, `Source/`)와 `.p4ignore`를 배치합니다.
-   * 표준 `.p4ignore` 필수 항목: `Saved/`, `Intermediate/`, `DerivedDataCache/`, `Binaries/`, `Build/`, `.vs/`, `.vsconfig`, `*.sln`, `*.slnx` 등 *(BuildServerKit이 생성한 `.p4ignore`에 모두 포함됨!)*
-4. P4V에서 워크스페이스 루트 폴더 우클릭 → **`Reconcile Offline Work`** 클릭 → **`Detect moved files`** + **`Apply P4IGNORE files for this workspace`** 2개 모두 체크 → **`Reconcile`** → **`Pending`** 탭 확인 → **`Submit`** (`CL #1`)!
-5. 2분 대기(또는 노트북 대시보드 **`[↻ P4 미러링 지금 실행]`**) → GitHub 커밋/잔디 생성 → Actions **`QuickVerify` ✅** → Discord/Slack 알림 도착 확인!
+### 7단계: 빈 UE5 프로젝트 최초 Submit → 첫 자동 빌드 확인
+* **방법 A — 가장 쉬운 방법 (신규 프로젝트 추천 ⭐):** 설정 마법사 4단계 또는 `[Perforce & 미러링]` 탭의 **`[✨ 빈 UE5 프로젝트 생성]`** 버튼을 눌러 PC에 설치된 UE5 버전 선택 → **C++ / Blueprint** 선택 → **`생성 직후 Perforce에 최초 CL #1 자동 Submit`** ON → 생성 클릭! *(끝! 에디터를 열지 않아도 `CL #1` 등록·동기화가 완료되며, 바로 `[↻ 지금 1회 미러링 테스트]`로 첫 `QuickVerify` 빌드를 확인할 수 있습니다. 팀원들은 P4V에서 `Get Latest` 한 번이면 바로 시작!)*
+* **방법 B — 기존 UE5 프로젝트가 작업 PC에 이미 있는 경우:**
+  1. 작업 PC에 **Tailscale** + **P4V** 설치 후 연결 (`<노트북_Tailscale_IP>:1666`, 본인 ID, 인코딩 **`UTF-8`**).
+  2. P4V 워크스페이스 생성 시:
+     * **⚠️ `Stream:` 칸을 절대 비워두지 말고** **`Browse...` → `//프로젝트/main`** 선택! *(비워두면 모든 스트림이 하위 폴더로 꼬여 내려옵니다)*
+     * **`Advanced`** 탭 → **`Rmdir`** 체크 권장 *(삭제된 빈 폴더 자동 정리)*.
+  3. 워크스페이스 Root **바로 아래**에 UE5 프로젝트(`*.uproject`, `Config/`, `Content/`, `Source/`)와 `.p4ignore`를 배치합니다.
+     * 표준 `.p4ignore` 필수 항목: `Saved/`, `Intermediate/`, `DerivedDataCache/`, `Binaries/`, `Build/`, `.vs/`, `.vsconfig`, `*.sln`, `*.slnx` 등 *(BuildServerKit이 생성한 `.p4ignore`에 모두 포함됨!)*
+  4. P4V에서 워크스페이스 루트 폴더 우클릭 → **`Reconcile Offline Work`** 클릭 → **`Detect moved files`** + **`Apply P4IGNORE files for this workspace`** 2개 모두 체크 → **`Reconcile`** → **`Pending`** 탭 확인 → **`Submit`** (`CL #1`)!
+  5. 2분 대기(또는 노트북 대시보드 **`[↻ P4 미러링 지금 실행]`**) → GitHub 커밋/잔디 생성 → Actions **`QuickVerify` ✅** → Discord/Slack 알림 도착 확인!
 
 ---
 

@@ -2151,6 +2151,192 @@
   });
 
   // ---------------------------------------------------------------------------
+  // Blank UE5 Project Generator Modal (Installed Versions Only + P4 CL #1)
+  // ---------------------------------------------------------------------------
+  let ueGenInstalledList = [];
+  let ueGenType = 'cpp';
+  let ueGenDirManuallyEdited = false;
+
+  function updateUeGenSubmitBtnLabel() {
+    const isP4 = (cfg.VcsMode || 'PerforceHybrid') === 'PerforceHybrid';
+    const doP4 = isP4 && $('chkUeGenP4Submit').checked;
+    $('ueGenP4Fields').style.display = doP4 ? 'grid' : 'none';
+    $('btnUeGenCreate').textContent = doP4 ? '✨ 빈 UE5 프로젝트 생성 + P4 최초 Submit' : '✨ 로컬 빈 UE5 프로젝트 생성';
+  }
+
+  async function refreshUeGenEngines() {
+    const sel = $('selUeGenEngine');
+    const hint = $('lblUeGenEngineHint');
+    sel.innerHTML = '<option value="">설치된 Unreal Engine 5 스캔 중...</option>';
+    const list = await safeCall(() => api.invoke('ue:listInstalled'));
+    ueGenInstalledList = Array.isArray(list) ? list : [];
+    sel.innerHTML = '';
+
+    if (ueGenInstalledList.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '이 PC에 설치된 Unreal Engine 5를 찾을 수 없습니다';
+      sel.appendChild(opt);
+      hint.innerHTML = '<span style="color:#fb7185;">⚠️ Epic Games Launcher에서 UE5를 먼저 설치한 뒤 [다시 스캔]을 눌러 주세요.</span>';
+      $('btnUeGenCreate').disabled = true;
+      return;
+    }
+
+    for (const eng of ueGenInstalledList) {
+      const opt = document.createElement('option');
+      opt.value = eng.path;
+      const tplTag = eng.hasCppTemplate ? '공식 템플릿 ✔' : '표준 내장 생성';
+      opt.textContent = `UE ${eng.version} (${eng.fullVersion}) — ${eng.path} [${tplTag}]`;
+      if (cfg.UE5Root && cfg.UE5Root.toLowerCase() === eng.path.toLowerCase()) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    hint.textContent = `이 PC에서 ${ueGenInstalledList.length}개의 UE5 설치를 감지했습니다. 선택한 버전 폴더의 공식 Blank 템플릿을 사용합니다.`;
+    $('btnUeGenCreate').disabled = false;
+  }
+
+  async function openUeProjectModal() {
+    if (remoteMode) return;
+    ueGenDirManuallyEdited = false;
+    $('ueGenResultBox').style.display = 'none';
+    $('ueGenResultBox').innerHTML = '';
+
+    const stream = cfg.P4Stream || '//MyProject/main';
+    const depotGuess = stream.replace(/^\/\//, '').split('/')[0] || '';
+    const defaultName = /^[A-Za-z][A-Za-z0-9_]{1,19}$/.test(depotGuess) && depotGuess.toLowerCase() !== 'myproject'
+      ? depotGuess
+      : '';
+    $('txtUeGenName').value = defaultName;
+    const baseWs = cfg.WorkspaceRoot || 'C:\\BuildSystem\\Workspace';
+    $('txtUeGenDir').value = defaultName ? `${baseWs}\\${defaultName}` : (cfg.ProjectDir || `${baseWs}\\MyProject`);
+
+    const isP4 = (cfg.VcsMode || 'PerforceHybrid') === 'PerforceHybrid';
+    $('ueGenP4SubmitBox').style.display = isP4 ? 'block' : 'none';
+    $('chkUeGenP4Submit').checked = isP4;
+    $('txtUeGenStream').value = stream;
+    $('txtUeGenAdmin').value =
+      $('txtProvAdminUser')?.value.trim() ||
+      $('txtTeamAdminUser')?.value.trim() ||
+      (cfg.P4User && cfg.P4User.toLowerCase() !== 'p4bot' ? cfg.P4User : '');
+
+    updateUeGenSubmitBtnLabel();
+    openModal('modalUeProject');
+    await refreshUeGenEngines();
+  }
+
+  $('btnOpenUeGen')?.addEventListener('click', openUeProjectModal);
+  $('btnWizOpenUeGen')?.addEventListener('click', async () => {
+    await saveWizardProgress();
+    openUeProjectModal();
+  });
+  $('btnWizOpenUeGenGit')?.addEventListener('click', async () => {
+    await saveWizardProgress();
+    openUeProjectModal();
+  });
+  $('btnUeGenRescan')?.addEventListener('click', refreshUeGenEngines);
+
+  document.querySelectorAll('#segUeGenType button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#segUeGenType button').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      ueGenType = btn.dataset.type || 'cpp';
+    });
+  });
+
+  $('txtUeGenName')?.addEventListener('input', () => {
+    if (ueGenDirManuallyEdited) return;
+    const n = $('txtUeGenName').value.trim();
+    const baseWs = cfg.WorkspaceRoot || 'C:\\BuildSystem\\Workspace';
+    if (n) $('txtUeGenDir').value = `${baseWs}\\${n}`;
+  });
+  $('txtUeGenDir')?.addEventListener('input', () => {
+    ueGenDirManuallyEdited = true;
+  });
+  $('chkUeGenP4Submit')?.addEventListener('change', updateUeGenSubmitBtnLabel);
+
+  $('btnUeGenCreate')?.addEventListener('click', async () => {
+    const ue5Root = $('selUeGenEngine').value;
+    const projectName = $('txtUeGenName').value.trim();
+    const targetDir = $('txtUeGenDir').value.trim();
+    const isP4 = (cfg.VcsMode || 'PerforceHybrid') === 'PerforceHybrid';
+    const submitToPerforce = isP4 && $('chkUeGenP4Submit').checked;
+    const adminUser = $('txtUeGenAdmin').value.trim();
+    const p4Stream = $('txtUeGenStream').value.trim();
+
+    if (!ue5Root) return toast('먼저 PC에 설치된 Unreal Engine 5 버전을 선택해 주세요.', 'error');
+    if (!projectName) return toast('프로젝트 이름을 입력해 주세요.', 'error');
+    if (submitToPerforce && !adminUser) return toast('Perforce 최초 Submit에 사용할 관리자 P4 ID를 입력해 주세요.', 'error');
+
+    const btn = $('btnUeGenCreate');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = submitToPerforce ? '생성 및 Perforce Submit 중...' : '프로젝트 생성 중...';
+
+    const res = await safeCall(() =>
+      api.invoke('ue:createBlankProject', {
+        ue5Root,
+        projectName,
+        projectType: ueGenType,
+        targetDir,
+        includeP4Ignore: $('chkUeGenP4Ignore').checked,
+        includeGitIgnore: $('chkUeGenGitIgnore').checked,
+        submitToPerforce,
+        adminUser,
+        p4Stream,
+        updateProjectDirConfig: $('chkUeGenSyncCfg').checked,
+      })
+    );
+
+    btn.disabled = false;
+    btn.textContent = origText;
+
+    if (!res || !res.ok) return;
+
+    const latestCfg = await safeCall(() => api.invoke('config:get'));
+    if (latestCfg) {
+      cfg = latestCfg;
+      hydrateConfigToUI();
+      syncWizardFieldsFromConfig();
+    }
+
+    const p4Line = res.p4Submit && res.p4Submit.ok
+      ? `<li><strong>Perforce 최초 Submit:</strong> ✔ <code>${escapeHtml(res.p4Submit.stream)}</code> → <strong>CL #${escapeHtml(res.p4Submit.cl)}</strong> 등록 및 <code>ws-build-full</code> 동기화 완료!</li>`
+      : '';
+    const mirrorBtnHtml = res.p4Submit && res.p4Submit.ok
+      ? `<button id="btnUeGenTestMirror" class="btn btn-sm btn-primary">↻ 지금 1회 미러링 테스트 (GitHub 첫 빌드)</button>`
+      : '';
+
+    const box = $('ueGenResultBox');
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div class="wiz-tip-title">🎉 빈 UE ${escapeHtml(res.engineVersion)} (${res.projectType === 'cpp' ? 'C++' : 'Blueprint'}) 프로젝트 생성 완료!</div>
+      <ul class="wiz-tip-list">
+        <li><strong>프로젝트 파일:</strong> <code>${escapeHtml(res.uprojectPath)}</code> (총 ${res.filesCreated.length}개 정석 파일, 캐시 0개)</li>
+        ${p4Line}
+      </ul>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        <button id="btnUeGenOpenFolder" class="btn btn-sm">📂 프로젝트 폴더 열기</button>
+        ${mirrorBtnHtml}
+      </div>
+    `;
+
+    $('btnUeGenOpenFolder')?.addEventListener('click', () => api.invoke('system:openFolder', res.targetDir));
+    $('btnUeGenTestMirror')?.addEventListener('click', async () => {
+      closeModal('modalUeProject');
+      closeModal('modalWizard');
+      switchView('dashboard');
+      await safeCall(() => api.invoke('p4:mirrorRun', {}), '미러링 완료! GitHub Actions에서 첫 QuickVerify 빌드가 시작됩니다.');
+      refreshMirrorStatus();
+    });
+
+    toast(
+      res.p4Submit && res.p4Submit.ok
+        ? `🎉 ${res.projectName} 생성 + Perforce CL #${res.p4Submit.cl} Submit 완료!`
+        : `🎉 ${res.projectName} 빈 프로젝트 생성 완료!`,
+      'success'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
   // Bootstrap
   // ---------------------------------------------------------------------------
   async function bootstrap(silent = false) {

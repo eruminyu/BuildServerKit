@@ -22,6 +22,7 @@ const { BuildService } = require('./core/buildService');
 const { GitHubService } = require('./core/githubService');
 const { RemoteWebServer } = require('./core/webServer');
 const { runFullDiagnostics, installViaWinget } = require('./core/diagnosticsService');
+const { UEProjectService } = require('./core/ueProjectService');
 
 let mainWindow = null;
 let tray = null;
@@ -37,6 +38,7 @@ const p4Service = new P4Service(configStore, stateHub);
 const p4ProvisionService = new P4ProvisionService(configStore, stateHub);
 const buildService = new BuildService(configStore, stateHub, p4Service);
 const githubService = new GitHubService(configStore, stateHub, buildService);
+const ueProjectService = new UEProjectService(configStore, stateHub);
 const webServer = new RemoteWebServer({ rendererDir, configStore, stateHub, buildService, p4Service });
 
 // Single-instance lock so 24/7 laptop never spawns duplicate runner/mirror managers
@@ -376,6 +378,10 @@ function registerIpcHandlers() {
   ipcMain.handle('wizard:complete', (_e, { completed = true } = {}) => {
     return configStore.save({ SetupCompleted: Boolean(completed) });
   });
+
+  // Blank UE5 Project Generator (installed versions only + optional initial P4 CL #1 submit)
+  ipcMain.handle('ue:listInstalled', () => ueProjectService.listInstalledEngines());
+  ipcMain.handle('ue:createBlankProject', (_e, payload) => ueProjectService.createBlankProject(payload || {}));
 }
 
 app.whenReady().then(async () => {
