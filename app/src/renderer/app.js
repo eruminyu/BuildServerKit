@@ -90,7 +90,11 @@
     });
     if (viewId === 'packaging') refreshPackages();
     if (viewId === 'history') refreshHistory();
-    if (viewId === 'perforce') refreshMirrorStatus();
+    if (viewId === 'perforce') {
+      refreshMirrorStatus();
+      refreshProvStatus();
+    }
+    if (viewId === 'team') refreshTeamTab();
   }
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
@@ -1065,6 +1069,624 @@
   api.on('packages:updated', (summary) => renderPackagesSummary(summary));
 
   // ---------------------------------------------------------------------------
+  // Perforce End-to-End GUI Install & One-Click Provisioning
+  // ---------------------------------------------------------------------------
+  function setProvPill(id, ok, okLabel, pendingLabel) {
+    const el = $(id);
+    if (!el) return;
+    el.className = ok ? 'prov-pill ok' : 'prov-pill';
+    el.textContent = ok ? `✔ ${okLabel}` : `○ ${pendingLabel || okLabel}`;
+  }
+
+  async function refreshProvStatus() {
+    if (remoteMode) return;
+    const adminInput = $('txtProvAdminUser')?.value.trim() || '';
+    const st = await safeCall(() => api.invoke('p4prov:status', { adminUser: adminInput }));
+    if (!st) return;
+
+    setProvPill('ppCli', st.p4CliInstalled, 'P4 CLI 설치됨', 'P4 CLI 미설치');
+    setProvPill('ppService', st.serverReachable || st.serviceRunning, 'P4D 실행 중', st.serviceInstalled ? 'P4D 중지됨' : 'P4D 미설치');
+    setProvPill('ppUnicode', st.unicodeEnabled, 'Unicode ON', 'Unicode OFF');
+    setProvPill('ppFirewall', st.firewallOpen, '방화벽(1666) 열림', '방화벽 미개방');
+    setProvPill('ppAdmin', st.adminLoggedIn, `관리자 로그인(${st.adminUser})`, `관리자 로그인 필요`);
+    setProvPill('ppStream', st.streamExists, 'Stream 디포 준비됨', 'Stream 미생성');
+    setProvPill('ppTypemap', st.typemapApplied, 'UE5 Typemap(+l) 적용됨', 'Typemap 미적용');
+    setProvPill('ppBot', st.botTicketValid, `봇 티켓 유효(${cfg.P4User || 'p4bot'})`, '봇 티켓 미발급');
+    setProvPill('ppWorkspaces', st.buildClientExists && st.mirrorClientExists, '빌드/미러 워크스페이스 완료', '워크스페이스 미생성');
+    setProvPill('ppIgnore', st.p4ignoreExists, '.p4ignore 준비됨', '.p4ignore 미생성');
+
+    if (!$('txtProvAdminUser').value.trim() && st.adminUser) {
+      $('txtProvAdminUser').value = st.adminUser;
+    }
+    const streamParts = (cfg.P4Stream || '//MyProject/main').replace(/^\/\//, '').split('/');
+    if (streamParts[0] && $('txtProvDepot').value === 'MyProject') {
+      $('txtProvDepot').value = streamParts[0];
+    }
+    if (streamParts[1]) {
+      $('txtProvStreamLeaf').value = streamParts[1];
+    }
+  }
+
+  function generateStrongBotPassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let pw = 'P4b!';
+    for (let i = 0; i < 12; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+    return pw;
+  }
+
+  async function withBusyButton(btnId, busyText, fn) {
+    const btn = $(btnId);
+    const orig = btn ? btn.textContent : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = busyText;
+    }
+    try {
+      return await fn();
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+  }
+
+  $('btnProvRefresh')?.addEventListener('click', refreshProvStatus);
+  $('btnProvGenPass')?.addEventListener('click', () => {
+    const pw = generateStrongBotPassword();
+    $('txtProvBotPass').type = 'text';
+    $('txtProvBotPass').value = pw;
+    navigator.clipboard.writeText(pw).catch(() => {});
+    toast('강력한 p4bot 비밀번호를 생성하고 클립보드에 복사했습니다!', 'success');
+  });
+
+  $('btnProvInstallP4D')?.addEventListener('click', () =>
+    withBusyButton('btnProvInstallP4D', '다운로드 중...', async () => {
+      const r = await safeCall(() => api.invoke('p4prov:installP4D'));
+      if (r && r.ok) {
+        toast('Helix Core Server(P4D) 공식 설치 창을 실행했습니다. 설치 완료 후 [세팅 상태 점검]을 누르세요.', 'success');
+      }
+    })
+  );
+
+  $('btnProvInstallP4V')?.addEventListener('click', () =>
+    withBusyButton('btnProvInstallP4V', 'winget 설치 중...', async () => {
+      toast('winget으로 Perforce P4V + P4 CLI 설치를 시작합니다...', 'info');
+      const r = await safeCall(() => api.invoke('p4prov:installP4V'));
+      if (r) {
+        toast(r.ok ? 'P4V + P4 CLI 설치 완료!' : `설치 종료 (ExitCode=${r.code})`, r.ok ? 'success' : 'error');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvUnicode')?.addEventListener('click', () =>
+    withBusyButton('btnProvUnicode', 'UAC 실행 중...', async () => {
+      const r = await safeCall(() => api.invoke('p4prov:enableUnicode', { p4Root: $('txtP4DepotRoot').value.trim() }));
+      if (r) {
+        toast(r.message, r.ok ? 'success' : 'error');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvFirewall')?.addEventListener('click', () =>
+    withBusyButton('btnProvFirewall', 'UAC 실행 중...', async () => {
+      const r = await safeCall(() => api.invoke('p4prov:openFirewall'));
+      if (r) {
+        toast(r.message, r.ok ? 'success' : 'error');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvAdminLogin')?.addEventListener('click', () =>
+    withBusyButton('btnProvAdminLogin', '로그인 중...', async () => {
+      const user = $('txtProvAdminUser').value.trim();
+      const password = $('txtProvAdminPass').value;
+      const r = await safeCall(() => api.invoke('p4prov:login', { user, password }));
+      if (r && r.ok) {
+        $('txtProvAdminPass').value = '';
+        toast(r.message, 'success');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvStream')?.addEventListener('click', () =>
+    withBusyButton('btnProvStream', '생성 중...', async () => {
+      const adminUser = $('txtProvAdminUser').value.trim();
+      const depotName = $('txtProvDepot').value.trim();
+      const streamName = $('txtProvStreamLeaf').value.trim() || 'main';
+      const r = await safeCall(() => api.invoke('p4prov:setupStream', { adminUser, depotName, streamName }));
+      if (r && r.ok) {
+        cfg = await api.invoke('config:get');
+        hydrateConfigToUI();
+        toast(r.message, 'success');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvTypemap')?.addEventListener('click', () =>
+    withBusyButton('btnProvTypemap', '적용 중...', async () => {
+      const adminUser = $('txtProvAdminUser').value.trim();
+      const r = await safeCall(() => api.invoke('p4prov:applyTypemap', { adminUser }));
+      if (r && r.ok) {
+        toast(r.message, 'success');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvBot')?.addEventListener('click', () =>
+    withBusyButton('btnProvBot', '봇 세팅 중...', async () => {
+      const adminUser = $('txtProvAdminUser').value.trim();
+      const botPassword = $('txtProvBotPass').value || generateStrongBotPassword();
+      if (!$('txtProvBotPass').value) $('txtProvBotPass').value = botPassword;
+      const r = await safeCall(() => api.invoke('p4prov:setupBot', { adminUser, botUser: 'p4bot', botPassword }));
+      if (r && r.ok) {
+        cfg = await api.invoke('config:get');
+        hydrateConfigToUI();
+        toast(r.message, 'success');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvWorkspaces')?.addEventListener('click', () =>
+    withBusyButton('btnProvWorkspaces', '생성 중...', async () => {
+      const adminUser = $('txtProvAdminUser').value.trim();
+      const depot = $('txtProvDepot').value.trim() || 'MyProject';
+      const leaf = $('txtProvStreamLeaf').value.trim() || 'main';
+      const r = await safeCall(() =>
+        api.invoke('p4prov:createWorkspaces', {
+          adminUser,
+          stream: `//${depot}/${leaf}`,
+          buildClient: $('txtP4BuildClient').value.trim() || 'ws-build-full',
+          mirrorClient: $('txtP4MirrorClient').value.trim() || 'ws-mirror-code',
+          mirrorRoot: $('txtP4MirrorDir').value.trim() || 'C:\\BuildSystem\\P4MirrorRepo',
+        })
+      );
+      if (r && r.ok) {
+        cfg = await api.invoke('config:get');
+        hydrateConfigToUI();
+        toast(r.message, 'success');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvIgnore')?.addEventListener('click', () =>
+    withBusyButton('btnProvIgnore', '생성 중...', async () => {
+      const r = await safeCall(() => api.invoke('p4prov:createP4Ignore', { targetDir: cfg.ProjectDir }));
+      if (r && r.ok) {
+        toast(r.message, 'success');
+        await refreshProvStatus();
+      }
+    })
+  );
+
+  $('btnProvRunAll')?.addEventListener('click', () =>
+    withBusyButton('btnProvRunAll', '⚡ 일괄 세팅 진행 중...', async () => {
+      const adminUser = $('txtProvAdminUser').value.trim();
+      const depotName = $('txtProvDepot').value.trim();
+      const streamName = $('txtProvStreamLeaf').value.trim() || 'main';
+      const createBot = $('chkProvCreateBot').checked;
+      let botPassword = $('txtProvBotPass').value;
+      if (createBot && !botPassword) {
+        botPassword = generateStrongBotPassword();
+        $('txtProvBotPass').value = botPassword;
+      }
+      if (!adminUser) return toast('먼저 관리자 Perforce 아이디를 입력하고 로그인해 주세요.', 'error');
+      if (!depotName) return toast('프로젝트 Stream 디포 이름을 입력해 주세요.', 'error');
+
+      const r = await safeCall(() =>
+        api.invoke('p4prov:runAll', { adminUser, depotName, streamName, botUser: 'p4bot', botPassword, createBot })
+      );
+      if (r && r.ok) {
+        cfg = await api.invoke('config:get');
+        hydrateConfigToUI();
+        toast('🎉 Perforce 서버 전체 원클릭 세팅 완료! (Stream + Typemap + 봇 + 워크스페이스 + .p4ignore)', 'success');
+        await refreshProvStatus();
+        await refreshTeamTab();
+      }
+    })
+  );
+
+  // ---------------------------------------------------------------------------
+  // Team & Perforce Account Management Tab (GitHub Profile Auto-Fill)
+  // ---------------------------------------------------------------------------
+  let teamP4State = { connected: false, users: [], userCount: 0, workspaceCount: 0, activeSystemUser: '', noAutoCreateLocked: false };
+  let lastLookedUpGh = null;
+
+  function clearTeamForm() {
+    $('txtTeamGhUrl').value = '';
+    $('txtTeamP4Id').value = '';
+    $('txtTeamName').value = '';
+    $('txtTeamEmail').value = '';
+    $('txtTeamPasswd').value = '';
+    lastLookedUpGh = null;
+    $('teamGhPreview').classList.remove('visible');
+  }
+
+  function showGhPreviewCard(profile) {
+    lastLookedUpGh = profile;
+    if (!profile) {
+      $('teamGhPreview').classList.remove('visible');
+      return;
+    }
+    $('imgTeamGhAvatar').src = profile.avatarUrl || '';
+    $('lblTeamGhName').textContent = profile.name || profile.login;
+    $('lblTeamGhLogin').textContent = `@${profile.login}`;
+
+    const badge = $('badgeTeamEmailSource');
+    const note = $('lblTeamEmailNote');
+    if (profile.emailSource === 'public_profile') {
+      badge.textContent = '✔ 공개 프로필 이메일';
+      badge.className = 'badge badge-green';
+      note.textContent = `GitHub 공개 이메일(${profile.email})을 불러왔습니다. 필요 시 아래 칸에서 직접 수정할 수 있습니다.`;
+    } else if (profile.emailSource === 'public_commit') {
+      badge.textContent = '✔ 최근 커밋 이메일 감지';
+      badge.className = 'badge badge-blue';
+      note.textContent = `최근 공개 커밋 기록에서 이메일(${profile.email})을 찾았습니다. GitHub 등록 이메일과 다른 경우 직접 수정하세요.`;
+    } else {
+      badge.textContent = 'ℹ 비공개 이메일 → 잔디용 noreply 자동 생성';
+      badge.className = 'badge badge-violet';
+      note.textContent = `이메일이 비공개여서 GitHub 공식 잔디용 주소(${profile.noreplyEmail})를 자동 입력했습니다. 본인 실제 이메일로 바꿔도 됩니다.`;
+    }
+    $('teamGhPreview').classList.add('visible');
+  }
+
+  function buildTeammateInviteGuide(p4Id, displayName) {
+    const ip = cfg.TailscaleIP || '<노트북_Tailscale_IP>';
+    const port = (cfg.P4Port || 'localhost:1666').split(':').pop() || '1666';
+    const stream = cfg.P4Stream || '//MyProject/main';
+    const webUrl = appState?.webServer?.running ? appState.webServer.url : `http://${ip}:${cfg.RemoteWebDashboardPort || 3780}`;
+    return [
+      `[${displayName || p4Id}님 Perforce 클라이언트 접속 안내]`,
+      `1. Tailscale 설치 후 초대받은 팀 네트워크 로그인`,
+      `2. P4V(Helix Visual Client) 설치 후 아래 정보로 연결:`,
+      `   - Server: ${ip}:${port}`,
+      `   - User: ${p4Id}`,
+      `   - Character Encoding: UTF-8 (필수!)`,
+      `   - Workspace Stream: ${stream}`,
+      `3. UE5 에디터 우측 하단 [Revision Control] -> Perforce 선택 후 동일 정보 연결`,
+      `4. 실시간 빌드 현황(브라우저): ${webUrl}`,
+      `5. 완성 빌드/로그 공유폴더(탐색기): \\\\${ip}\\BuildArchive`,
+    ].join('\n');
+  }
+
+  function upsertAuthorMapLocal({ p4User, name, email, githubLogin, githubUrl, avatarUrl }) {
+    const idx = authorMapRows.findIndex((r) => r.p4User.toLowerCase() === p4User.toLowerCase());
+    const existing = idx >= 0 ? authorMapRows[idx] : {};
+    const record = {
+      p4User,
+      name: name || existing.name || p4User,
+      email: email || existing.email || '',
+      githubLogin: githubLogin || existing.githubLogin || '',
+      githubUrl: githubUrl || existing.githubUrl || '',
+      avatarUrl: avatarUrl || existing.avatarUrl || '',
+    };
+    if (idx >= 0) authorMapRows[idx] = record;
+    else authorMapRows.push(record);
+    return authorMapRows;
+  }
+
+  function renderTeamRoster() {
+    const uCount = teamP4State.userCount || 0;
+    const wsCount = teamP4State.workspaceCount || 0;
+
+    $('navTeamBadge').textContent = `${uCount}/5`;
+    $('navTeamBadge').className = uCount > 5 ? 'nav-badge danger' : uCount > 0 ? 'nav-badge ok' : 'nav-badge';
+
+    $('teamUserQuotaVal').textContent = teamP4State.connected ? `${uCount} / 5명` : `오프라인 (${authorMapRows.length}명 매핑)`;
+    $('teamUserQuotaBadge').textContent = !teamP4State.connected
+      ? 'P4 미연결'
+      : uCount > 5
+        ? '한도 초과!'
+        : uCount === 5
+          ? '최대치 (5/5)'
+          : '여유 있음';
+    $('teamUserQuotaBadge').className = !teamP4State.connected
+      ? 'badge badge-slate'
+      : uCount > 5
+        ? 'badge badge-rose'
+        : uCount === 5
+          ? 'badge badge-amber'
+          : 'badge badge-green';
+
+    $('teamWsQuotaVal').textContent = teamP4State.connected ? `${wsCount} / 20개` : '- / 20개';
+    $('teamWsQuotaBadge').textContent = !teamP4State.connected ? 'P4 미연결' : wsCount > 20 ? '한도 초과!' : '정상';
+    $('teamWsQuotaBadge').className = !teamP4State.connected ? 'badge badge-slate' : wsCount > 20 ? 'badge badge-rose' : 'badge badge-green';
+
+    $('teamAutoCreateBadge').textContent = !teamP4State.connected
+      ? '미확인'
+      : teamP4State.noAutoCreateLocked
+        ? '차단됨 (안전)'
+        : '허용 중 (권장: 차단)';
+    $('teamAutoCreateBadge').className = !teamP4State.connected
+      ? 'badge badge-slate'
+      : teamP4State.noAutoCreateLocked
+        ? 'badge badge-green'
+        : 'badge badge-amber';
+    $('btnLockAutoCreate').style.display = teamP4State.noAutoCreateLocked ? 'none' : 'inline-flex';
+
+    // Auto-fill Admin User input once if empty
+    if (!$('txtTeamAdminUser').value.trim()) {
+      $('txtTeamAdminUser').value = teamP4State.activeSystemUser || (cfg.P4User !== 'p4bot' ? cfg.P4User : '') || 'p4murmur';
+    }
+
+    $('teamRosterSubtitle').textContent = teamP4State.connected
+      ? `Perforce 서버(${cfg.P4Port}) 유저 ${uCount}명과 로컬 잔디 매핑 ${authorMapRows.length}건을 통합 표시합니다.`
+      : `Perforce 서버에 아직 연결되지 않아 로컬 author_map.json(${authorMapRows.length}건)만 표시 중입니다.`;
+
+    // Merge P4 users + author_map rows
+    const mergedMap = new Map();
+    for (const u of teamP4State.users || []) {
+      mergedMap.set(u.p4User.toLowerCase(), {
+        p4User: u.p4User,
+        p4Name: u.fullName,
+        p4Email: u.email,
+        inP4: true,
+        mapName: '',
+        mapEmail: '',
+        githubLogin: '',
+        githubUrl: '',
+        avatarUrl: '',
+        inMap: false,
+      });
+    }
+    for (const m of authorMapRows || []) {
+      const k = (m.p4User || '').toLowerCase();
+      if (!k) continue;
+      const cur = mergedMap.get(k) || {
+        p4User: m.p4User,
+        p4Name: '',
+        p4Email: '',
+        inP4: false,
+      };
+      cur.mapName = m.name || '';
+      cur.mapEmail = m.email || '';
+      cur.githubLogin = m.githubLogin || '';
+      cur.githubUrl = m.githubUrl || '';
+      cur.avatarUrl = m.avatarUrl || '';
+      cur.inMap = true;
+      mergedMap.set(k, cur);
+    }
+
+    const rows = Array.from(mergedMap.values());
+    const tbody = $('teamRosterBody');
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">등록된 팀원이 없습니다. 위 카드에 GitHub 프로필 링크를 붙여넣어 첫 팀원을 추가해 보세요!</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows
+      .map((r) => {
+        const isBot = r.p4User.toLowerCase().includes('bot');
+        const initial = (r.p4User || '?').slice(0, 1).toUpperCase();
+        const avatarHtml = r.avatarUrl
+          ? `<img class="gh-avatar-sm" src="${escapeHtml(r.avatarUrl)}" alt="" />`
+          : `<span class="gh-avatar-placeholder">${escapeHtml(initial)}</span>`;
+        const statusBadge = isBot
+          ? '<span class="badge badge-violet">자동화 봇</span>'
+          : r.inP4 && r.inMap
+            ? '<span class="badge badge-green">✔ P4 + 잔디 연동</span>'
+            : r.inP4
+              ? '<span class="badge badge-blue">P4 등록됨</span>'
+              : '<span class="badge badge-amber">매핑 전용</span>';
+
+        return `
+        <tr>
+          <td>
+            <div style="display:flex; align-items:center; gap:9px;">
+              ${avatarHtml}
+              <div>
+                <div style="font-weight:700;">${escapeHtml(r.p4User)}</div>
+                ${r.githubLogin ? `<div style="font-size:11px; color:var(--text-muted);">@${escapeHtml(r.githubLogin)}</div>` : ''}
+              </div>
+            </div>
+          </td>
+          <td>${escapeHtml(r.mapName || r.p4Name || '-')}</td>
+          <td><span class="mono-code">${escapeHtml(r.p4Email || '미등록')}</span></td>
+          <td><span class="mono-code">${escapeHtml(r.mapEmail || (r.inP4 ? 'P4 이메일 자동 사용' : '-'))}</span></td>
+          <td>${statusBadge}</td>
+          <td style="text-align:right; white-space:nowrap;">
+            <button class="btn btn-sm team-edit-btn" data-id="${escapeHtml(r.p4User)}">수정</button>
+            <button class="btn btn-sm team-invite-btn" data-id="${escapeHtml(r.p4User)}" data-name="${escapeHtml(r.mapName || r.p4Name || r.p4User)}">안내복사</button>
+            ${remoteMode ? '' : `<button class="btn btn-sm btn-danger team-del-btn" data-id="${escapeHtml(r.p4User)}" data-inp4="${r.inP4 ? '1' : '0'}">삭제</button>`}
+          </td>
+        </tr>`;
+      })
+      .join('');
+
+    tbody.querySelectorAll('.team-edit-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = rows.find((x) => x.p4User === btn.dataset.id);
+        if (!row) return;
+        $('txtTeamP4Id').value = row.p4User;
+        $('txtTeamName').value = row.mapName || row.p4Name || row.p4User;
+        $('txtTeamEmail').value = row.mapEmail || row.p4Email || '';
+        $('txtTeamGhUrl').value = row.githubUrl || (row.githubLogin ? `https://github.com/${row.githubLogin}` : '');
+        $('txtTeamPasswd').value = '';
+        if (row.avatarUrl || row.githubLogin) {
+          showGhPreviewCard({
+            login: row.githubLogin || row.p4User,
+            name: row.mapName || row.p4Name || row.p4User,
+            email: row.mapEmail || row.p4Email || '',
+            noreplyEmail: row.mapEmail || '',
+            emailSource: 'public_profile',
+            githubUrl: row.githubUrl || `https://github.com/${row.githubLogin}`,
+            avatarUrl: row.avatarUrl || '',
+          });
+        } else {
+          $('teamGhPreview').classList.remove('visible');
+        }
+        document.querySelector('.content-area')?.scrollTo({ top: 0, behavior: 'smooth' });
+        toast(`'${row.p4User}' 정보를 편집창에 불러왔습니다. GitHub 링크를 붙여넣어 자동 업데이트할 수 있습니다.`, 'info');
+      });
+    });
+
+    tbody.querySelectorAll('.team-invite-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const text = buildTeammateInviteGuide(btn.dataset.id, btn.dataset.name);
+        await navigator.clipboard.writeText(text);
+        toast(`'${btn.dataset.id}' 팀원용 P4V 접속 가이드가 복사되었습니다!`, 'success');
+      });
+    });
+
+    tbody.querySelectorAll('.team-del-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const targetId = btn.dataset.id;
+        const inP4 = btn.dataset.inp4 === '1';
+        const adminId = $('txtTeamAdminUser').value.trim();
+
+        if (inP4 && adminId && targetId.toLowerCase() === adminId.toLowerCase()) {
+          return toast('현재 사용 중인 관리자 계정은 안전상 여기서 삭제할 수 없습니다.', 'error');
+        }
+
+        const msg = inP4
+          ? `'${targetId}'의 잔디 매핑(author_map.json)을 삭제할까요?\n\n(확인 시 매핑을 제거하고, 이어서 Perforce 서버 계정 삭제 여부를 한 번 더 확인합니다.)`
+          : `'${targetId}'의 잔디 매핑(author_map.json)을 삭제할까요?`;
+        if (!confirm(msg)) return;
+
+        authorMapRows = authorMapRows.filter((r) => r.p4User.toLowerCase() !== targetId.toLowerCase());
+        const saved = await safeCall(() => api.invoke('config:authorMap:save', authorMapRows));
+        if (saved) {
+          authorMapRows = saved;
+          renderAuthorMap();
+        }
+
+        if (inP4 && confirm(`Perforce 서버에서도 '${targetId}' 계정을 완전히 삭제(p4 user -d)할까요?\n(취소를 누르면 P4 계정은 유지됩니다.)`)) {
+          await safeCall(() => api.invoke('p4:team:deleteUser', { adminUser: adminId, p4User: targetId }), `P4 계정 '${targetId}' 삭제 완료!`);
+        } else {
+          toast(`'${targetId}' 매핑이 제거되었습니다.`, 'info');
+        }
+        await refreshTeamTab();
+      });
+    });
+  }
+
+  async function refreshTeamTab() {
+    if (remoteMode) return;
+    const mapRows = await safeCall(() => api.invoke('config:authorMap:get'));
+    if (mapRows) {
+      authorMapRows = mapRows;
+      renderAuthorMap();
+    }
+    const adminUser = $('txtTeamAdminUser')?.value.trim() || '';
+    const res = await safeCall(() => api.invoke('p4:team:list', { adminUser }));
+    if (res) {
+      teamP4State = res;
+    }
+    renderTeamRoster();
+  }
+
+  async function lookupTeamGitHubProfile() {
+    const input = $('txtTeamGhUrl').value.trim();
+    if (!input) return toast('GitHub 프로필 링크 또는 아이디를 입력해 주세요.', 'error');
+    const btn = $('btnTeamLookupGh');
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '조회 중...';
+    const profile = await safeCall(() => api.invoke('github:lookupProfile', input));
+    btn.disabled = false;
+    btn.textContent = orig;
+    if (!profile) return;
+
+    showGhPreviewCard(profile);
+    // Keep existing P4 ID if user is editing an existing account (e.g. p4murmur); otherwise suggest GitHub login
+    if (!$('txtTeamP4Id').value.trim()) {
+      $('txtTeamP4Id').value = profile.login;
+    }
+    $('txtTeamName').value = profile.name || profile.login;
+    $('txtTeamEmail').value = profile.email || profile.noreplyEmail;
+    toast(`GitHub 프로필(@${profile.login}) 정보를 불러왔습니다!`, 'success');
+  }
+
+  $('btnTeamRefresh')?.addEventListener('click', refreshTeamTab);
+  $('btnTeamClearForm')?.addEventListener('click', clearTeamForm);
+  $('btnTeamLookupGh')?.addEventListener('click', lookupTeamGitHubProfile);
+  $('txtTeamGhUrl')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      lookupTeamGitHubProfile();
+    }
+  });
+  $('btnTeamOpenGhProfile')?.addEventListener('click', () => {
+    if (lastLookedUpGh && lastLookedUpGh.githubUrl) {
+      api.invoke('system:openExternal', lastLookedUpGh.githubUrl);
+    }
+  });
+  $('btnLockAutoCreate')?.addEventListener('click', async () => {
+    const adminUser = $('txtTeamAdminUser').value.trim();
+    const r = await safeCall(() => api.invoke('p4:team:lockAutoCreate', { adminUser }));
+    if (r && r.ok) {
+      toast(r.message, 'success');
+      refreshTeamTab();
+    }
+  });
+  $('btnTeamSaveMapOnly')?.addEventListener('click', async () => {
+    const p4User = $('txtTeamP4Id').value.trim();
+    const name = $('txtTeamName').value.trim() || p4User;
+    const email = $('txtTeamEmail').value.trim();
+    if (!p4User || !email) return toast('Perforce 아이디와 이메일을 입력해 주세요.', 'error');
+
+    upsertAuthorMapLocal({
+      p4User,
+      name,
+      email,
+      githubLogin: lastLookedUpGh?.login || '',
+      githubUrl: lastLookedUpGh?.githubUrl || $('txtTeamGhUrl').value.trim(),
+      avatarUrl: lastLookedUpGh?.avatarUrl || '',
+    });
+    const saved = await safeCall(() => api.invoke('config:authorMap:save', authorMapRows), `'${p4User}' 잔디 매핑 저장 완료!`);
+    if (saved) {
+      authorMapRows = saved;
+      renderAuthorMap();
+      renderTeamRoster();
+    }
+  });
+  $('btnTeamSaveBoth')?.addEventListener('click', async () => {
+    const p4User = $('txtTeamP4Id').value.trim();
+    const fullName = $('txtTeamName').value.trim() || p4User;
+    const email = $('txtTeamEmail').value.trim();
+    const password = $('txtTeamPasswd').value;
+    const adminUser = $('txtTeamAdminUser').value.trim();
+
+    if (!p4User || !email) return toast('Perforce 아이디와 이메일을 입력해 주세요.', 'error');
+
+    const p4Res = await safeCall(() =>
+      api.invoke('p4:team:upsertUser', { adminUser, p4User, fullName, email, password })
+    );
+    if (!p4Res) return;
+
+    upsertAuthorMapLocal({
+      p4User,
+      name: fullName,
+      email,
+      githubLogin: lastLookedUpGh?.login || '',
+      githubUrl: lastLookedUpGh?.githubUrl || $('txtTeamGhUrl').value.trim(),
+      avatarUrl: lastLookedUpGh?.avatarUrl || '',
+    });
+    const saved = await safeCall(() => api.invoke('config:authorMap:save', authorMapRows));
+    if (saved) {
+      authorMapRows = saved;
+      renderAuthorMap();
+    }
+    $('txtTeamPasswd').value = '';
+    toast(`${p4Res.message} + 잔디 매핑 저장 완료!`, 'success');
+    await refreshTeamTab();
+  });
+  $('btnTeamCopyInvite')?.addEventListener('click', async () => {
+    const p4User = $('txtTeamP4Id').value.trim() || '<팀원_P4_ID>';
+    const name = $('txtTeamName').value.trim() || p4User;
+    await navigator.clipboard.writeText(buildTeammateInviteGuide(p4User, name));
+    toast(`'${p4User}' 팀원용 P4V 접속 가이드가 클립보드에 복사되었습니다!`, 'success');
+  });
+
+  // ---------------------------------------------------------------------------
   // First-Run & On-Demand Setup Wizard + PC Environment Diagnostics
   // ---------------------------------------------------------------------------
   let wizStep = 1;
@@ -1165,6 +1787,10 @@
     listEl.innerHTML = (report.checks || [])
       .map((c) => {
         const showActions = c.status === 'missing' || c.status === 'warn';
+        const autoP4dBtn =
+          showActions && c.autoInstallP4D
+            ? `<button class="btn btn-sm btn-primary wiz-install-p4d">⬇ P4D 자동 다운로드·설치</button>`
+            : '';
         const applyUserBtn =
           showActions && c.applyP4User
             ? `<button class="btn btn-sm btn-success wiz-apply-p4user" data-user="${escapeHtml(c.applyP4User)}">✔ ${escapeHtml(c.applyP4User)} 계정 적용</button>`
@@ -1191,10 +1817,22 @@
             </div>
             <div class="diag-card-detail">${escapeHtml(c.detail)}</div>
           </div>
-          <div class="diag-card-actions">${applyUserBtn}${jumpBtn}${wingetBtn}${dlBtn}</div>
+          <div class="diag-card-actions">${autoP4dBtn}${applyUserBtn}${jumpBtn}${wingetBtn}${dlBtn}</div>
         </div>`;
       })
       .join('');
+
+    listEl.querySelectorAll('.wiz-install-p4d').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '다운로드 중...';
+        const r = await safeCall(() => api.invoke('p4prov:installP4D'));
+        btn.disabled = false;
+        btn.textContent = orig;
+        if (r && r.ok) toast('P4D 공식 설치 프로그램을 실행했습니다. 설치 후 [다시 검사]를 누르세요!', 'success');
+      });
+    });
 
     listEl.querySelectorAll('.wiz-apply-p4user').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -1384,9 +2022,11 @@
     const r = await safeCall(() => api.invoke('p4:registerMirrorTask'));
     if (r) toast(r.ok ? 'Windows 자동 미러링 작업 스케줄러 등록 완료!' : r.message, r.ok ? 'success' : 'error');
   });
-  $('btnWizCopyP4Guide')?.addEventListener('click', async () => {
-    await navigator.clipboard.writeText($('wizP4Cheat').textContent || '');
-    toast('Perforce 초기 세팅 명령어가 복사되었습니다.', 'success');
+  $('btnWizOpenP4Provision')?.addEventListener('click', async () => {
+    await saveWizardProgress();
+    closeModal('modalWizard');
+    switchView('perforce');
+    document.querySelector('.content-area')?.scrollTo({ top: 0, behavior: 'smooth' });
   });
   $('btnWizGitClone')?.addEventListener('click', async () => {
     const r = await safeCall(() => api.invoke('github:clone'));
@@ -1468,6 +2108,7 @@
         authorMapRows = mapRows;
         renderAuthorMap();
       }
+      refreshTeamTab();
       // ★ PC 최초 실행 시 설정 마법사 자동 작동!
       if (!silent && !cfg.SetupCompleted) {
         openWizard(1);

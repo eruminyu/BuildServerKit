@@ -10,7 +10,7 @@ const WINGET_ALLOWLIST = {
   git: { id: 'Git.Git', label: 'Git for Windows' },
   tailscale: { id: 'Tailscale.Tailscale', label: 'Tailscale VPN' },
   gh: { id: 'GitHub.cli', label: 'GitHub CLI (gh)' },
-  p4cli: { id: 'Perforce.P4', label: 'Perforce CLI (p4)' },
+  p4cli: { id: 'Perforce.P4V', label: 'Perforce P4V + P4 CLI' },
   vsbuildtools: { id: 'Microsoft.VisualStudio.2022.BuildTools', label: 'Visual Studio 2022 Build Tools' },
 };
 
@@ -384,7 +384,8 @@ async function runFullDiagnostics(configStore, modeOverride = '') {
     detail: p4Detail,
     // Do NOT show P4D download button when server is already reachable!
     downloadUrl: p4.serverReachable ? '' : 'https://www.perforce.com/downloads/helix-core-p4d',
-    downloadLabel: p4.serverReachable ? '' : 'Helix Core(P4D) 다운로드',
+    downloadLabel: p4.serverReachable ? '' : '공식 페이지 ↗',
+    autoInstallP4D: !p4.serverReachable && !p4.serviceInstalled && isP4,
     applyP4User: p4.serverReachable && !p4.ticketOk && p4.activeSystemTicketOk ? p4.activeSystemUser : '',
     jumpToStep: p4.serverReachable && p4dStatus === 'warn' ? 4 : 0,
   });

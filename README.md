@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛠️ BuildServerKit Studio `v2.0`
+# 🛠️ BuildServerKit Studio `v2.1.0`
 
 **Unreal Engine 5 전용 빌드 PC / 노트북 올인원 자동화 매니저 — Perforce 하이브리드 미러링 · GitHub Actions Self-Hosted Runner · 패키지 자동 보관 정리 · Discord/Slack 리포트 · Tailscale 원격 웹 대시보드**
 
@@ -19,6 +19,8 @@
 ## ✨ v2.0 주요 기능
 
 * **✨ 최초 실행 설정 마법사 & PC 필수 요소 자동 진단**: 새 PC에서 처음 실행하면(또는 배포용 `Factory Reset` 후 첫 실행 시) **5단계 설정 마법사**가 자동 실행되어 **Unreal Engine 5(버전 자동 탐색) · Visual Studio C++(MSVC) · Git · Perforce(CLI/P4D) · Tailscale · RAM/SSD 용량 · Runner** 상태를 실시간 진단하고, 부족한 요소는 공식 다운로드 또는 **`winget` 원클릭 설치**로 바로 보완할 수 있습니다. 이후에도 좌측 하단/대시보드의 **`[✨ 설정 마법사]`** 버튼으로 언제든 다시 열 수 있습니다.
+* **⚡ Perforce GUI 설치 & 원클릭 서버 자동 세팅 (터미널 불필요)**: `[Perforce & 미러링]` 탭에서 최신 Helix Core Server(`P4D`) 자동 다운로드·설치, `winget` `Perforce.P4V`(P4V+CLI) 설치, UAC Unicode 전환(`p4d -xi`), 방화벽 개방(`1666`/`3780`), GUI 관리자 로그인, 그리고 **Stream 디포 · UE5 Typemap(`+l`) · Read-Only `p4bot` 무기한 티켓 · 전용 워크스페이스 2개 · `.p4ignore` 원클릭 일괄 구성**을 모두 지원합니다.
+* **👥 팀원 & 계정 관리 탭 (GitHub 프로필 링크 자동 채우기)**: GitHub 프로필 URL(`https://github.com/<아이디>`)만 붙여넣으면 아바타·이름·잔디용 이메일(비공개 시 공식 `{id}+{login}@users.noreply.github.com` 자동 생성)을 채워 **Perforce 계정 생성/수정 + `author_map.json` 저장 + 팀원용 P4V 접속 가이드 복사**까지 한 번에 처리하며, 무료 플랜 5유저/20워크스페이스 한도와 임의 유저 자동생성 차단(`dm.user.noautocreate=2`)을 실시간 관리합니다.
 * **🎨 모던 Electron 데스크톱 앱 (`BuildServerKit Studio`)**: 커스텀 프레임리스 다크 UI, 시스템 트레이 상주, 실시간 컬러 빌드 콘솔 + 자동 에러 발췌 패널, 디스크·패키지 용량 게이지.
 * **🧹 클린 배포(Distribution-First) 설계**: 포터블 단일 실행 파일(`BuildServerKit_Studio_Portable.exe`) 내부에는 개인 토큰·로컬 설정이 일절 포함되지 않으며, UE5 경로·Tailscale IP를 대상 PC에서 자동 감지합니다. 다른 팀에 배포 전 `[알림 · 네트워크 · 설정]`의 **`Factory Reset`**을 누르면 `SetupCompleted`가 초기화되어 다음 PC에서 마법사가 자동 시작됩니다.
 * **🌐 선택적 Tailscale 원격 웹 대시보드**: 앱 내장 HTTP/SSE 서버를 토글 한 번으로 켜면 팀원들이 원격 데스크톱 없이 브라우저(`http://<TailscaleIP>:3780`)에서 실시간 빌드 상태·콘솔·에러·패키지 목록을 열람할 수 있습니다 *(기본 읽기 전용, 모든 토큰·설정 원격 노출 차단)*.

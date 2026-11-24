@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com;" />
   <title>BuildServerKit Studio</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -21,7 +21,7 @@
             </svg>
           </div>
           <span>BuildServerKit Studio</span>
-          <span class="brand-version">v2.0.1</span>
+          <span class="brand-version">v2.1.0</span>
         </div>
         <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
       </div>
@@ -81,6 +81,11 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           <span>GitHub & Runner</span>
           <span id="navRunnerBadge" class="nav-badge">OFF</span>
+        </button>
+        <button class="nav-item" data-view="team">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>팀원 &amp; 계정 관리</span>
+          <span id="navTeamBadge" class="nav-badge">0/5</span>
         </button>
 
         <div class="nav-section-label">Operations</div>
@@ -409,7 +414,7 @@
           <div class="page-header">
             <div>
               <h1 class="page-title">Perforce 서버 & GitHub 코드·에셋 자동 미러링</h1>
-              <p class="page-subtitle">Read-Only 전용 봇(p4bot) 기준 세팅 · 아티스트 에셋 Submit 1줄 로그 기록 · 새벽 정기 백업</p>
+              <p class="page-subtitle">GUI 원클릭 설치·초기 세팅 · Read-Only 전용 봇(p4bot) · 아티스트 에셋 Submit 1줄 로그 기록 · 새벽 정기 백업</p>
             </div>
             <div style="display:flex; gap:8px; align-items:center;">
               <div class="segmented" id="vcsModeSegmented">
@@ -417,6 +422,90 @@
                 <button data-mode="Git">Git 단독 모드</button>
               </div>
               <button id="btnSaveP4Tab" class="btn btn-primary local-only">✔ P4 설정 저장</button>
+            </div>
+          </div>
+
+          <!-- ★ Hero Card: End-to-End GUI Perforce Install & One-Click Provisioning -->
+          <div class="card featured">
+            <div class="card-header">
+              <div>
+                <div class="card-title">⚡ Perforce 서버 설치 &amp; 원클릭 자동 세팅 (터미널 명령어 불필요)</div>
+                <div class="card-desc">P4D/P4V 설치부터 Unicode·방화벽·Stream 디포·UE5 Typemap(+l)·<code>p4bot</code> 무기한 티켓·전용 워크스페이스·<code>.p4ignore</code>까지 GUI에서 클릭만으로 완료합니다.</div>
+              </div>
+              <button id="btnProvRefresh" class="btn btn-sm local-only">↻ 세팅 상태 점검</button>
+            </div>
+
+            <div id="provStatusPills" class="prov-pills">
+              <span class="prov-pill" id="ppCli">○ P4 CLI</span>
+              <span class="prov-pill" id="ppService">○ P4D 서버</span>
+              <span class="prov-pill" id="ppUnicode">○ Unicode(UTF-8)</span>
+              <span class="prov-pill" id="ppFirewall">○ 방화벽(1666)</span>
+              <span class="prov-pill" id="ppAdmin">○ 관리자 로그인</span>
+              <span class="prov-pill" id="ppStream">○ Stream 디포</span>
+              <span class="prov-pill" id="ppTypemap">○ UE5 Typemap(+l)</span>
+              <span class="prov-pill" id="ppBot">○ 자동화 봇 티켓</span>
+              <span class="prov-pill" id="ppWorkspaces">○ 빌드/미러 워크스페이스</span>
+              <span class="prov-pill" id="ppIgnore">○ .p4ignore</span>
+            </div>
+
+            <!-- Section A: Install & OS Setup -->
+            <div class="prov-section">
+              <div class="prov-section-title">A. 프로그램 설치 · Unicode 전환 · Windows 방화벽 (노트북 최초 1회)</div>
+              <div class="prov-btn-grid">
+                <button id="btnProvInstallP4D" class="btn btn-primary local-only">⬇ 1. P4D 서버 다운로드·설치</button>
+                <button id="btnProvInstallP4V" class="btn btn-violet local-only">⚡ 2. P4V + CLI 설치 (winget)</button>
+                <button id="btnProvUnicode" class="btn local-only">🔤 3. Unicode 활성화 (p4d -xi)</button>
+                <button id="btnProvFirewall" class="btn local-only">🛡 4. 방화벽 개방 (1666/3780)</button>
+              </div>
+            </div>
+
+            <!-- Section B: Admin Login & One-Click Server Provisioning -->
+            <div class="prov-section">
+              <div class="prov-section-title">B. 관리자 로그인 &amp; 서버 내부 원클릭 자동 구성 (Stream · Typemap · p4bot · 워크스페이스 · .p4ignore)</div>
+              <div class="form-grid" style="margin-bottom:10px;">
+                <div class="field">
+                  <label>관리자 Perforce 아이디 (super 권한)</label>
+                  <input id="txtProvAdminUser" class="input mono" placeholder="예: p4murmur 또는 admin" />
+                </div>
+                <div class="field">
+                  <label>관리자 비밀번호 (GUI 바로 로그인)</label>
+                  <div class="input-group">
+                    <input id="txtProvAdminPass" type="password" class="input mono" placeholder="로그인할 때만 입력" />
+                    <button id="btnProvAdminLogin" class="btn btn-sm btn-success local-only">🔑 로그인</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>생성할 프로젝트 Stream 디포 이름</label>
+                  <div class="input-group">
+                    <input id="txtProvDepot" class="input mono" value="MyProject" placeholder="MyProject" />
+                    <input id="txtProvStreamLeaf" class="input mono" value="main" style="width:95px; flex:none;" placeholder="main" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Read-Only 봇(<code>p4bot</code>) 비밀번호 (8자 이상)</label>
+                  <div class="input-group">
+                    <input id="txtProvBotPass" type="password" class="input mono" placeholder="8자 이상 (또는 자동생성)" />
+                    <button id="btnProvGenPass" class="btn btn-sm local-only" title="강력한 임시 비밀번호 생성">🎲 자동생성</button>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+                <label style="display:inline-flex; align-items:center; gap:7px; font-size:12.5px; color:var(--text-secondary); cursor:pointer;">
+                  <input id="chkProvCreateBot" type="checkbox" checked />
+                  <span>5번째 계정으로 Read-Only <code>p4bot</code> + 무기한 티켓 함께 생성 (팀원 4인 이하 권장 · 5인이면 해제)</span>
+                </label>
+                <button id="btnProvRunAll" class="btn btn-primary btn-lg local-only">🚀 원클릭 일괄 자동 세팅 실행</button>
+              </div>
+
+              <div style="display:flex; flex-wrap:wrap; gap:6px; padding-top:10px; border-top:1px solid var(--border-subtle); align-items:center;">
+                <span style="font-size:11.5px; color:var(--text-muted); margin-right:4px;">개별 단계 실행:</span>
+                <button id="btnProvStream" class="btn btn-sm local-only">1. Stream 디포 생성</button>
+                <button id="btnProvTypemap" class="btn btn-sm local-only">2. UE5 Typemap(+l) 적용</button>
+                <button id="btnProvBot" class="btn btn-sm local-only">3. p4bot + 무기한 티켓</button>
+                <button id="btnProvWorkspaces" class="btn btn-sm local-only">4. 빌드/미러 워크스페이스 생성</button>
+                <button id="btnProvIgnore" class="btn btn-sm local-only">5. .p4ignore 생성</button>
+              </div>
             </div>
           </div>
 
@@ -715,7 +804,140 @@
           </div>
         </section>
 
-        <!-- ==================== VIEW 5: HISTORY ==================== -->
+        <!-- ==================== VIEW 5: TEAM & ACCOUNTS ==================== -->
+        <section id="view-team" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">팀원 &amp; Perforce 계정 관리</h1>
+              <p class="page-subtitle">GitHub 프로필 링크만 붙여넣으면 이름·잔디용 이메일을 자동 조회해 Perforce 계정 생성/수정과 매핑을 한 번에 처리합니다.</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button id="btnTeamRefresh" class="btn btn-sm">↻ P4 유저 &amp; 한도 새로고침</button>
+            </div>
+          </div>
+
+          <!-- Free-Tier Quota & Protection Bar -->
+          <div class="kpi-grid-3">
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>Perforce 유저 수 (무료 한도)</span>
+                <span id="teamUserQuotaBadge" class="badge badge-slate">확인 중</span>
+              </div>
+              <div id="teamUserQuotaVal" class="kpi-value">0 / 5명</div>
+              <div class="kpi-sub">6명 이상이면 무료 1,000파일 제한 발동</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>워크스페이스 수 (무료 한도)</span>
+                <span id="teamWsQuotaBadge" class="badge badge-slate">확인 중</span>
+              </div>
+              <div id="teamWsQuotaVal" class="kpi-value">0 / 20개</div>
+              <div class="kpi-sub">팀원당 1~2개 워크스페이스 유지 권장</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>임의 유저 자동생성 차단</span>
+                <span id="teamAutoCreateBadge" class="badge badge-slate">미확인</span>
+              </div>
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:2px;">
+                <span id="teamAutoCreateDesc" style="font-size:12px; color:var(--text-secondary);">오타로 6번째 유저 생성 방지</span>
+                <button id="btnLockAutoCreate" class="btn btn-sm btn-violet local-only">🔒 차단 켜기</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hero Card: Paste GitHub Profile Link -> Auto-Fill & Upsert -->
+          <div class="card featured">
+            <div class="card-header">
+              <div>
+                <div class="card-title">✨ GitHub 프로필 링크로 팀원 빠르게 추가 / 수정</div>
+                <div class="card-desc">GitHub 링크(예: <code>https://github.com/eruminyu</code>) 또는 <code>@아이디</code>를 입력하면 이름·아바타·잔디용 이메일을 자동으로 채워줍니다.</div>
+              </div>
+              <button id="btnTeamClearForm" class="btn btn-sm btn-ghost">입력 비우기</button>
+            </div>
+
+            <div class="input-group">
+              <input id="txtTeamGhUrl" class="input mono" placeholder="https://github.com/eruminyu 또는 @eruminyu" />
+              <button id="btnTeamLookupGh" class="btn btn-violet local-only" style="min-width:170px;">🔍 GitHub 정보 자동 채우기</button>
+            </div>
+
+            <div id="teamGhPreview" class="gh-profile-preview">
+              <img id="imgTeamGhAvatar" class="gh-avatar" src="" alt="avatar" />
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <strong id="lblTeamGhName" style="font-size:14px;">-</strong>
+                  <span id="lblTeamGhLogin" class="mono-code">@-</span>
+                  <span id="badgeTeamEmailSource" class="badge badge-blue">-</span>
+                </div>
+                <div id="lblTeamEmailNote" style="font-size:12px; color:var(--text-secondary); margin-top:3px;">-</div>
+              </div>
+              <button id="btnTeamOpenGhProfile" class="btn btn-sm">프로필 열기 ↗</button>
+            </div>
+
+            <div class="form-grid" style="margin-top:14px;">
+              <div class="field">
+                <label>Perforce 아이디 (User — 공백/@ 불가)</label>
+                <input id="txtTeamP4Id" class="input mono" placeholder="예: p4murmur 또는 eruminyu" />
+                <span class="field-hint">기존 유저를 수정하려면 목록에서 [수정] 클릭 또는 기존 ID 입력</span>
+              </div>
+              <div class="field">
+                <label>표시 이름 (FullName)</label>
+                <input id="txtTeamName" class="input" placeholder="예: eruminyu" />
+              </div>
+              <div class="field">
+                <label>GitHub 잔디 연동 이메일 (Email)</label>
+                <input id="txtTeamEmail" class="input mono" placeholder="eruminyu@gmail.com 또는 12345+id@users.noreply.github.com" />
+                <span class="field-hint">GitHub Settings → Emails에 등록된 이메일과 일치하면 잔디가 찍힙니다.</span>
+              </div>
+              <div class="field">
+                <label>Perforce 비밀번호 (신규 생성·변경 시만 입력 · 8자 이상)</label>
+                <input id="txtTeamPasswd" type="password" class="input mono" placeholder="비워두면 기존 비밀번호 유지" />
+              </div>
+              <div class="field full">
+                <label>P4 계정 생성/수정에 사용할 관리자 P4 ID (super 권한)</label>
+                <div class="input-group">
+                  <input id="txtTeamAdminUser" class="input mono" placeholder="예: p4murmur 또는 admin" />
+                </div>
+                <span class="field-hint">P4 서버에 직접 반영하려면 로그인된 관리자 ID를 입력하세요. (로컬 <code>author_map.json</code>만 저장할 땐 비워도 됩니다.)</span>
+              </div>
+            </div>
+
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;">
+              <button id="btnTeamSaveBoth" class="btn btn-primary local-only">✔ Perforce 계정 반영 + 잔디 매핑 동시 저장</button>
+              <button id="btnTeamSaveMapOnly" class="btn local-only">잔디 매핑(author_map.json)만 저장</button>
+              <button id="btnTeamCopyInvite" class="btn btn-success">📋 이 팀원용 P4V 접속 가이드 복사</button>
+            </div>
+          </div>
+
+          <!-- Unified Team Roster Table -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">👥 등록된 Perforce 유저 &amp; GitHub 잔디 매핑 현황</div>
+                <div id="teamRosterSubtitle" class="card-desc">Perforce 서버 유저 목록과 로컬 <code>author_map.json</code>을 통합 표시합니다.</div>
+              </div>
+            </div>
+            <div class="table-wrap" style="max-height:420px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>팀원 / P4 ID</th>
+                    <th>표시 이름</th>
+                    <th>Perforce 등록 이메일</th>
+                    <th>GitHub 잔디 매핑</th>
+                    <th>상태</th>
+                    <th style="text-align:right; width:210px;">작업</th>
+                  </tr>
+                </thead>
+                <tbody id="teamRosterBody">
+                  <tr><td colspan="6" class="empty-state">등록된 팀원 정보를 불러오는 중...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 6: HISTORY ==================== -->
         <section id="view-history" class="view-panel">
           <div class="page-header">
             <div>
@@ -1169,18 +1391,10 @@
 
             <div class="card" style="padding:14px 16px;">
               <div class="card-header" style="margin-bottom:6px;">
-                <div class="card-title">📋 신규 PC Perforce 서버 초기 명령어 빠른 참조</div>
-                <button id="btnWizCopyP4Guide" class="btn btn-sm">명령어 복사</button>
+                <div class="card-title">⚡ 터미널 없이 GUI로 Perforce 서버 한 번에 세팅하기</div>
+                <button id="btnWizOpenP4Provision" class="btn btn-sm btn-primary">Perforce 원클릭 세팅 열기 →</button>
               </div>
-              <div id="wizP4Cheat" class="wiz-cheatsheet"># 1) 한글 Unicode 활성화 (최초 1회)
-net stop Perforce && p4d -r "C:\Perforce\Server" -xi && net start Perforce
-p4 set P4PORT=localhost:1666 && p4 set P4CHARSET=utf8
-
-# 2) Read-Only 봇(p4bot) + 무기한 티켓
-p4 -u admin user -f p4bot
-p4 -u admin group automation_bots   # Timeout: unlimited, Users: p4bot
-p4 -u admin protect                 # 하단 추가: read group automation_bots * //...
-p4 -p localhost:1666 -u p4bot login</div>
+              <div class="card-desc">P4D 설치, Unicode 전환, 방화벽 개방, Stream 디포, UE5 Typemap(+l), <code>p4bot</code> 무기한 티켓, 전용 워크스페이스 생성을 모두 버튼 클릭만으로 끝낼 수 있습니다.</div>
             </div>
           </div>
 

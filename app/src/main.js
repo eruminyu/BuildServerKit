@@ -16,6 +16,7 @@ const {
   ensureAssetJunctions,
 } = require('./core/systemService');
 const { P4Service } = require('./core/p4Service');
+const { P4ProvisionService } = require('./core/p4ProvisionService');
 const { BuildService } = require('./core/buildService');
 const { GitHubService } = require('./core/githubService');
 const { RemoteWebServer } = require('./core/webServer');
@@ -31,6 +32,7 @@ const rendererDir = path.join(__dirname, 'renderer');
 const configStore = new ConfigStore(kitDir);
 const stateHub = new StateHub();
 const p4Service = new P4Service(configStore, stateHub);
+const p4ProvisionService = new P4ProvisionService(configStore, stateHub);
 const buildService = new BuildService(configStore, stateHub, p4Service);
 const githubService = new GitHubService(configStore, stateHub, buildService);
 const webServer = new RemoteWebServer({ rendererDir, configStore, stateHub, buildService, p4Service });
@@ -293,10 +295,29 @@ function registerIpcHandlers() {
   ipcMain.handle('p4:registerBackupTask', (_e, { time, adminUser } = {}) =>
     p4Service.registerBackupTaskScheduler(time || '04:00', adminUser || 'admin')
   );
+  ipcMain.handle('p4:team:list', (_e, { adminUser } = {}) => p4Service.listUsersAndQuotas(adminUser || ''));
+  ipcMain.handle('p4:team:upsertUser', (_e, payload) => p4Service.upsertP4User(payload || {}));
+  ipcMain.handle('p4:team:deleteUser', (_e, payload) => p4Service.deleteP4User(payload || {}));
+  ipcMain.handle('p4:team:lockAutoCreate', (_e, { adminUser } = {}) => p4Service.lockAutoUserCreate(adminUser || ''));
+
+  // Perforce Full GUI Provisioning (Install -> Unicode/Firewall -> Stream -> Typemap -> p4bot -> Workspaces -> .p4ignore)
+  ipcMain.handle('p4prov:status', (_e, { adminUser } = {}) => p4ProvisionService.inspectStatus(adminUser || ''));
+  ipcMain.handle('p4prov:installP4D', () => p4ProvisionService.downloadAndRunP4DInstaller());
+  ipcMain.handle('p4prov:installP4V', () => p4ProvisionService.installP4ClientViaWinget());
+  ipcMain.handle('p4prov:enableUnicode', (_e, { p4Root } = {}) => p4ProvisionService.enableUnicodeAndEnvironment(p4Root || ''));
+  ipcMain.handle('p4prov:openFirewall', () => p4ProvisionService.openFirewallPorts());
+  ipcMain.handle('p4prov:login', (_e, payload) => p4ProvisionService.loginP4User(payload || {}));
+  ipcMain.handle('p4prov:setupStream', (_e, payload) => p4ProvisionService.setupStreamDepot(payload || {}));
+  ipcMain.handle('p4prov:applyTypemap', (_e, payload) => p4ProvisionService.applyUe5Typemap(payload || {}));
+  ipcMain.handle('p4prov:setupBot', (_e, payload) => p4ProvisionService.setupReadOnlyBot(payload || {}));
+  ipcMain.handle('p4prov:createWorkspaces', (_e, payload) => p4ProvisionService.createStandardWorkspaces(payload || {}));
+  ipcMain.handle('p4prov:createP4Ignore', (_e, { targetDir } = {}) => p4ProvisionService.createUe5P4Ignore(targetDir || ''));
+  ipcMain.handle('p4prov:runAll', (_e, payload) => p4ProvisionService.runOneClickProvisionAll(payload || {}));
 
   // GitHub & Runner
   ipcMain.handle('github:ghToken', () => githubService.getGhCliToken());
   ipcMain.handle('github:fetchRepos', (_e, token) => githubService.fetchUserAndRepos(token));
+  ipcMain.handle('github:lookupProfile', (_e, input) => githubService.lookupGitHubProfile(input));
   ipcMain.handle('github:branches', () => githubService.fetchBranches());
   ipcMain.handle('github:workflowTemplate', (_e, type) => githubService.getWorkflowTemplate(type));
   ipcMain.handle('github:scanWorkflow', (_e, branch) => githubService.scanWorkflow(branch));

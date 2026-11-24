@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execCapture, spawnStreamed } = require('./processRunner');
+const { execCapture, execWithStdin, spawnStreamed } = require('./processRunner');
 
 class P4Service {
   constructor(configStore, stateHub) {
@@ -371,6 +371,175 @@ class P4Service {
       '/F',
     ]);
     return { ok: res.code === 0, message: (res.stdout || res.stderr).trim() };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Team & Account Management (Free-tier 5-user / 20-workspace safe helpers)
+  // ---------------------------------------------------------------------------
+  async listUsersAndQuotas(adminUserOverride = '') {
+    const cfg = this.configStore.get();
+    const port = cfg.P4Port || 'localhost:1666';
+    const userArg = (adminUserOverride || cfg.P4User || '').trim();
+    const base = userArg ? ['-p', port, '-u', userArg] : ['-p', port];
+
+    // Also inspect current default OS user from -ztag info
+    let activeSystemUser = '';
+    const infoRes = await execCapture('p4', ['-p', port, '-ztag', 'info'], { timeoutMs: 5000 });
+    const connected = infoRes.code === 0;
+    if (connected) {
+      const m = (infoRes.stdout || '').match(/^\.\.\.\s+userName\s+(.+)$/m);
+      if (m) activeSystemUser = m[1].trim();
+    }
+
+    const users = [];
+    let workspaceCount = 0;
+    let noAutoCreate = '';
+    let error = '';
+
+    if (connected) {
+      // Try with configured user, fallback to activeSystemUser if ticket missing
+      let uRes = await execCapture('p4', [...base, '-ztag', 'users'], { timeoutMs: 6000 });
+      let effectiveBase = base;
+      if (uRes.code !== 0 && activeSystemUser && activeSystemUser !== userArg) {
+        effectiveBase = ['-p', port, '-u', activeSystemUser];
+        uRes = await execCapture('p4', [...effectiveBase, '-ztag', 'users'], { timeoutMs: 6000 });
+      }
+
+      if (uRes.code === 0) {
+        let cur = null;
+        for (const line of (uRes.stdout || '').split(/\r?\n/)) {
+          const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s*(.*)$/);
+          if (!m) continue;
+          const [, k, v] = m;
+          if (k === 'User') {
+            if (cur) users.push(cur);
+            cur = { p4User: v.trim(), email: '', fullName: '', type: 'standard' };
+          } else if (cur) {
+            if (k === 'Email') cur.email = v.trim();
+            else if (k === 'FullName') cur.fullName = v.trim();
+            else if (k === 'Type') cur.type = v.trim();
+          }
+        }
+        if (cur) users.push(cur);
+      } else {
+        error = (uRes.stderr || uRes.stdout || '').trim();
+      }
+
+      const cRes = await execCapture('p4', [...effectiveBase, '-ztag', 'clients'], { timeoutMs: 6000 });
+      if (cRes.code === 0) {
+        workspaceCount = (cRes.stdout.match(/^\.\.\.\s+client\s+/gm) || []).length;
+      }
+
+      const cfgRes = await execCapture('p4', [...effectiveBase, 'configure', 'show', 'dm.user.noautocreate'], { timeoutMs: 5000 });
+      if (cfgRes.code === 0) {
+        const cm = (cfgRes.stdout || '').match(/dm\.user\.noautocreate\s*=\s*(\d+)/);
+        if (cm) noAutoCreate = cm[1];
+      }
+    } else {
+      error = (infoRes.stderr || infoRes.stdout || 'Perforce 서버에 연결할 수 없습니다.').trim();
+    }
+
+    return {
+      connected,
+      activeSystemUser,
+      users,
+      userCount: users.length,
+      workspaceCount,
+      noAutoCreateLocked: noAutoCreate === '2' || noAutoCreate === '1',
+      error,
+    };
+  }
+
+  async upsertP4User({ adminUser, p4User, fullName, email, password = '' }) {
+    const targetId = String(p4User || '').trim();
+    if (!targetId || /[\s@#*%"'\\/]/.test(targetId)) {
+      throw new Error('Perforce 아이디에는 공백이나 특수문자(@, #, *, % 등)를 사용할 수 없습니다.');
+    }
+    const targetEmail = String(email || '').trim();
+    if (!targetEmail || !targetEmail.includes('@')) {
+      throw new Error('올바른 이메일 주소를 입력해 주세요.');
+    }
+    const targetName = String(fullName || targetId).trim();
+
+    const cfg = this.configStore.get();
+    const port = cfg.P4Port || 'localhost:1666';
+    const admin = (adminUser || '').trim();
+    const base = admin ? ['-p', port, '-u', admin] : ['-p', port];
+
+    // 1. Fetch current spec (or default template for new user)
+    const outRes = await execCapture('p4', [...base, 'user', '-o', targetId], { timeoutMs: 6000 });
+    if (outRes.code !== 0) {
+      throw new Error(`p4 user -o 실패: ${(outRes.stderr || outRes.stdout).trim()}`);
+    }
+
+    const lines = (outRes.stdout || '').split(/\r?\n/);
+    let emailSet = false;
+    let nameSet = false;
+    const updatedLines = lines.map((line) => {
+      if (/^Email:/i.test(line)) {
+        emailSet = true;
+        return `Email:\t${targetEmail}`;
+      }
+      if (/^FullName:/i.test(line)) {
+        nameSet = true;
+        return `FullName:\t${targetName}`;
+      }
+      return line;
+    });
+    if (!emailSet) updatedLines.push(`Email:\t${targetEmail}`);
+    if (!nameSet) updatedLines.push(`FullName:\t${targetName}`);
+
+    // 2. Apply updated user spec with -f (admin force)
+    const saveRes = await execWithStdin('p4', [...base, 'user', '-f', '-i'], updatedLines.join('\n') + '\n', { timeoutMs: 8000 });
+    if (saveRes.code !== 0) {
+      throw new Error(`p4 user -f -i 실패: ${(saveRes.stderr || saveRes.stdout).trim()}`);
+    }
+
+    // 3. Optionally set password (if 8+ chars provided)
+    let passwordMsg = '';
+    if (password && password.length > 0) {
+      if (password.length < 8) {
+        throw new Error('Perforce 비밀번호는 최소 8자 이상이어야 합니다.');
+      }
+      const pwRes = await execWithStdin('p4', [...base, 'passwd', targetId], `${password}\n${password}\n`, { timeoutMs: 8000 });
+      if (pwRes.code !== 0) {
+        passwordMsg = ` (비밀번호 설정 경고: ${(pwRes.stderr || pwRes.stdout).trim()})`;
+      } else {
+        passwordMsg = ' · 비밀번호 설정 완료';
+      }
+    }
+
+    this.stateHub.appendLog(`✔ [P4 계정 저장] ${targetId} (${targetName} <${targetEmail}>)${passwordMsg}`, 'success');
+    return { ok: true, message: `Perforce 계정 '${targetId}' 저장 완료!${passwordMsg}` };
+  }
+
+  async deleteP4User({ adminUser, p4User }) {
+    const targetId = String(p4User || '').trim();
+    if (!targetId) throw new Error('삭제할 Perforce 아이디가 없습니다.');
+    const cfg = this.configStore.get();
+    const port = cfg.P4Port || 'localhost:1666';
+    const admin = (adminUser || '').trim();
+    const base = admin ? ['-p', port, '-u', admin] : ['-p', port];
+
+    const res = await execCapture('p4', [...base, 'user', '-f', '-d', targetId], { timeoutMs: 8000 });
+    if (res.code !== 0) {
+      throw new Error(`p4 user -d 실패: ${(res.stderr || res.stdout).trim()}`);
+    }
+    this.stateHub.appendLog(`✔ [P4 계정 삭제] ${targetId}`, 'warn');
+    return { ok: true, message: `Perforce 계정 '${targetId}'이(가) 삭제되었습니다.` };
+  }
+
+  async lockAutoUserCreate(adminUser = '') {
+    const cfg = this.configStore.get();
+    const port = cfg.P4Port || 'localhost:1666';
+    const admin = (adminUser || '').trim();
+    const base = admin ? ['-p', port, '-u', admin] : ['-p', port];
+
+    const res = await execCapture('p4', [...base, 'configure', 'set', 'dm.user.noautocreate=2'], { timeoutMs: 6000 });
+    if (res.code !== 0) {
+      throw new Error(`설정 실패: ${(res.stderr || res.stdout).trim()}`);
+    }
+    return { ok: true, message: '임의 유저 자동 생성이 차단되었습니다 (dm.user.noautocreate=2).' };
   }
 }
 

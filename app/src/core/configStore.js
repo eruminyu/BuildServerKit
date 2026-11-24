@@ -187,7 +187,14 @@ class ConfigStore {
           const entries = [];
           for (const [k, v] of Object.entries(parsed)) {
             if (k.startsWith('_') || !v || typeof v !== 'object') continue;
-            entries.push({ p4User: k, name: v.name || '', email: v.email || '' });
+            entries.push({
+              p4User: k,
+              name: v.name || '',
+              email: v.email || '',
+              githubLogin: v.githubLogin || '',
+              githubUrl: v.githubUrl || '',
+              avatarUrl: v.avatarUrl || '',
+            });
           }
           return entries;
         } catch {}
@@ -203,10 +210,14 @@ class ConfigStore {
     for (const item of entries || []) {
       const id = (item.p4User || '').trim();
       if (!id) continue;
-      obj[id] = {
+      const rec = {
         name: (item.name || id).trim(),
         email: (item.email || '').trim(),
       };
+      if (item.githubLogin) rec.githubLogin = String(item.githubLogin).trim();
+      if (item.githubUrl) rec.githubUrl = String(item.githubUrl).trim();
+      if (item.avatarUrl) rec.avatarUrl = String(item.avatarUrl).trim();
+      obj[id] = rec;
     }
     const json = JSON.stringify(obj, null, 2) + '\n';
     try {

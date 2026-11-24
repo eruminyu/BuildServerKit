@@ -105,6 +105,74 @@ class GitHubService {
     };
   }
 
+  async lookupGitHubProfile(profileInput) {
+    const raw = String(profileInput || '').trim();
+    if (!raw) throw new Error('GitHub 프로필 링크 또는 사용자 아이디를 입력해 주세요.');
+
+    let username = raw;
+    const urlMatch = raw.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)(?:[\/?#].*)?$/i);
+    if (urlMatch) {
+      username = urlMatch[1];
+    } else {
+      username = raw.replace(/^@+/, '').trim();
+    }
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(username)) {
+      throw new Error(`유효한 GitHub 프로필 URL 또는 아이디가 아닙니다: ${raw}`);
+    }
+
+    const token = (this.configStore.get().GitHubAccessToken || '').trim();
+    const userResp = await githubRequest('GET', `/users/${encodeURIComponent(username)}`, token);
+    const u = userResp.data || {};
+    const login = u.login || username;
+    const displayName = (u.name || login).trim();
+    const numericId = u.id || '';
+    const noreplyEmail = numericId ? `${numericId}+${login}@users.noreply.github.com` : `${login}@users.noreply.github.com`;
+
+    let email = (u.email || '').trim();
+    let emailSource = email ? 'public_profile' : 'noreply';
+
+    // If profile email is hidden, inspect recent public push events for a real commit email
+    if (!email) {
+      try {
+        const evResp = await githubRequest('GET', `/users/${encodeURIComponent(login)}/events/public?per_page=15`, token);
+        const events = Array.isArray(evResp.data) ? evResp.data : [];
+        for (const ev of events) {
+          if (ev.type !== 'PushEvent' || !ev.payload || !Array.isArray(ev.payload.commits)) continue;
+          for (const c of ev.payload.commits) {
+            const cEmail = c && c.author && c.author.email ? String(c.author.email).trim() : '';
+            const cName = c && c.author && c.author.name ? String(c.author.name).trim() : '';
+            if (
+              cEmail &&
+              !cEmail.includes('bot') &&
+              (cName.toLowerCase() === login.toLowerCase() || cName.toLowerCase() === displayName.toLowerCase() || cEmail.toLowerCase().includes(login.toLowerCase()))
+            ) {
+              email = cEmail;
+              emailSource = 'public_commit';
+              break;
+            }
+          }
+          if (email) break;
+        }
+      } catch {}
+    }
+
+    if (!email) {
+      email = noreplyEmail;
+      emailSource = 'noreply';
+    }
+
+    return {
+      login,
+      name: displayName,
+      email,
+      noreplyEmail,
+      emailSource, // public_profile | public_commit | noreply
+      githubUrl: u.html_url || `https://github.com/${login}`,
+      avatarUrl: u.avatar_url || '',
+      bio: u.bio || '',
+    };
+  }
+
   async fetchBranches() {
     const cfg = this.configStore.get();
     if (!cfg.ConnectedRepoFullName || !cfg.GitHubAccessToken) return [];

@@ -135,6 +135,47 @@ function execCapture(command, args, options = {}) {
   });
 }
 
+function execWithStdin(command, args, stdinText = '', options = {}) {
+  return new Promise((resolve) => {
+    const outChunks = [];
+    const errChunks = [];
+    const proc = spawn(command, args, {
+      cwd: options.cwd,
+      env: { ...process.env, P4CHARSET: 'utf8', ...(options.env || {}) },
+      windowsHide: true,
+      shell: Boolean(options.shell),
+    });
+
+    let timer = null;
+    if (options.timeoutMs) {
+      timer = setTimeout(() => {
+        killProcessTree(proc.pid);
+      }, options.timeoutMs);
+    }
+
+    if (proc.stdout) proc.stdout.on('data', (c) => outChunks.push(c));
+    if (proc.stderr) proc.stderr.on('data', (c) => errChunks.push(c));
+
+    proc.on('error', (err) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code: -1, stdout: '', stderr: err.message });
+    });
+
+    proc.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({
+        code: typeof code === 'number' ? code : -1,
+        stdout: decodeSmart(Buffer.concat(outChunks)),
+        stderr: decodeSmart(Buffer.concat(errChunks)),
+      });
+    });
+
+    if (proc.stdin) {
+      proc.stdin.end(Buffer.from(String(stdinText || ''), 'utf8'));
+    }
+  });
+}
+
 function killProcessTree(pid) {
   if (!pid) return;
   try {
@@ -146,5 +187,6 @@ module.exports = {
   decodeSmart,
   spawnStreamed,
   execCapture,
+  execWithStdin,
   killProcessTree,
 };
