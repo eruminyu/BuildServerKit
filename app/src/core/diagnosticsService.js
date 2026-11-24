@@ -350,7 +350,7 @@ async function runFullDiagnostics(configStore, modeOverride = '') {
         : 'optional';
 
   let p4Summary = 'Git 모드에선 불필요';
-  let p4Detail = '노트북 올인원 구성 시 Windows용 Helix Core Server(P4D)를 설치하세요. (원격 P4 서버를 쓴다면 4단계에서 P4PORT만 변경)';
+  let p4Detail = '노트북 올인원 구성 시 Windows용 Helix Core Server(P4D)를 설치하세요. 💡 최초 설치 시 생성하는 super 계정은 "관리자 + 본인 작업용" 1개로 겸용하면 무료 5유저(4인+p4bot)를 알뜰하게 쓸 수 있습니다.';
   if (p4.serverReachable) {
     const ticketTxt = p4.ticketOk
       ? `티켓:유효 (${p4.configuredUser})`

@@ -349,6 +349,10 @@
     $('kpiRunnerBadge').className = runnerBadgeCls;
     $('runnerDetailBadge').textContent = runnerLabel;
     $('runnerDetailBadge').className = runnerBadgeCls;
+    if ($('wizRunnerBadge')) {
+      $('wizRunnerBadge').textContent = runnerLabel;
+      $('wizRunnerBadge').className = runnerBadgeCls;
+    }
     $('navRunnerBadge').textContent = runner.running || runner.apiPolling ? 'ON' : 'OFF';
     $('navRunnerBadge').className = runner.running || runner.apiPolling ? 'nav-badge ok' : 'nav-badge';
     if (!remoteMode) {
@@ -1987,16 +1991,25 @@
     await safeCall(() => api.invoke('github:pushWorkflow', { branch, templateType: tplType }), `'${branch}' 브랜치에 build.yml 등록 완료!`);
   });
   $('btnWizDlRunner')?.addEventListener('click', async () => {
-    await safeCall(() => api.invoke('runner:download'), 'Runner 다운로드 완료!');
-    syncWizardFieldsFromConfig();
+    const r = await safeCall(() => api.invoke('runner:download'), 'Runner 다운로드 완료!');
+    if (r && r.status && appState) {
+      appState.runner = r.status;
+      renderState();
+    }
   });
   $('btnWizRegRunner')?.addEventListener('click', async () => {
-    await safeCall(() => api.invoke('runner:register'), 'Runner 자동 등록 완료!');
-    syncWizardFieldsFromConfig();
+    const r = await safeCall(() => api.invoke('runner:register'), 'Runner 자동 등록 완료!');
+    if (r && r.status && appState) {
+      appState.runner = r.status;
+      renderState();
+    }
   });
   $('btnWizStartRunner')?.addEventListener('click', async () => {
-    await safeCall(() => api.invoke('runner:start'), 'Runner 가동 시작!');
-    syncWizardFieldsFromConfig();
+    const st = await safeCall(() => api.invoke('runner:start'), 'Runner 가동 시작!');
+    if (st && appState) {
+      appState.runner = st;
+      renderState();
+    }
   });
   $('btnWizP4Test')?.addEventListener('click', async () => {
     await saveWizardProgress();

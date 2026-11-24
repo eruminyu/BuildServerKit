@@ -262,7 +262,7 @@ class GitHubService {
     } catch {}
 
     const body = {
-      message: `ci: configure Unreal Engine ${templateType === 'perforce' ? 'Perforce Hybrid' : 'Git'} build workflow (build.yml)`,
+      message: `ci: configure Unreal Engine ${templateType === 'perforce' ? 'Perforce Hybrid' : 'Git'} build workflow (build.yml) [skip ci]`,
       content: Buffer.from(tpl.content, 'utf8').toString('base64'),
       branch: targetBranch,
     };

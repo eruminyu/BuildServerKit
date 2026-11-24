@@ -21,7 +21,7 @@
             </svg>
           </div>
           <span>BuildServerKit Studio</span>
-          <span class="brand-version">v2.1.0</span>
+          <span class="brand-version">v2.1.1</span>
         </div>
         <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
       </div>
@@ -464,8 +464,9 @@
               <div class="prov-section-title">B. 관리자 로그인 &amp; 서버 내부 원클릭 자동 구성 (Stream · Typemap · p4bot · 워크스페이스 · .p4ignore)</div>
               <div class="form-grid" style="margin-bottom:10px;">
                 <div class="field">
-                  <label>관리자 Perforce 아이디 (super 권한)</label>
-                  <input id="txtProvAdminUser" class="input mono" placeholder="예: p4murmur 또는 admin" />
+                  <label>관리자 Perforce 아이디 (super 권한 · 본인 작업용 겸용)</label>
+                  <input id="txtProvAdminUser" class="input mono" placeholder="예: p4murmur 또는 본인 영문 ID" />
+                  <span class="field-hint">💡 P4D 최초 설치 시 만드는 super 계정은 '관리자 + 본인 작업용' 1개로 겸용하세요! (별도 admin 생성 시 무료 5유저 중 1자리 낭비)</span>
                 </div>
                 <div class="field">
                   <label>관리자 비밀번호 (GUI 바로 로그인)</label>

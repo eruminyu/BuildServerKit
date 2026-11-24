@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - 'main'
+    paths-ignore:
+      - '.github/**'
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'
   workflow_dispatch:
     inputs:
       build_mode:
@@ -79,8 +85,14 @@ jobs:
 
           if ($EventName -eq "workflow_dispatch" -and $InputCL -match '^\d+$') {
               $TargetCL = $InputCL
-          } elseif ($EventName -eq "push" -and $HeadMsg -match '\[CL #(\d+)\]') {
-              $TargetCL = $Matches[1]
+          } elseif ($EventName -eq "push") {
+              if ($HeadMsg -match '\[CL #(\d+)\]') {
+                  $TargetCL = $Matches[1]
+              } else {
+                  Write-Host "[스킵] Perforce 미러링 커밋([CL #번호])이 아니므로 빌드를 건너뜁니다." -ForegroundColor Yellow
+                  "skip_build=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+                  exit 0
+              }
           } else {
               # 수동 실행(CL 미지정) 또는 야간 스케줄: P4 스트림의 실제 최신 Submitted CL 조회
               $HeadOut = & p4 -p $P4Port -u $P4User -ztag changes -s submitted -m 1 "$P4Stream/..."
