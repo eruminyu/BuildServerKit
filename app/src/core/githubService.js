@@ -186,7 +186,8 @@ class GitHubService {
 
   getWorkflowTemplate(templateType = 'perforce') {
     const fileName = templateType === 'git' ? 'github_workflow_build.yml' : 'github_workflow_p4_build.yml';
-    const filePath = this.configStore.resolveScriptPath(fileName);
+    const inKit = path.join(this.configStore.getKitDir(), fileName);
+    const filePath = fs.existsSync(inKit) ? inKit : this.configStore.resolveScriptPath(fileName);
     if (!fs.existsSync(filePath)) {
       throw new Error(`워크플로우 템플릿을 찾을 수 없습니다: ${fileName}`);
     }
@@ -404,6 +405,13 @@ class GitHubService {
       this.stopApiPoller();
       this.stateHub.appendLog('[안내] 공식 Self-Hosted Runner 가동 시 중복 빌드를 막기 위해 API 자동 폴러를 자동으로 중지했습니다.', 'warn');
     }
+
+    // Ensure current Windows user allows PowerShell workflow scripts (RemoteSigned)
+    await execCapture(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'try { Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force } catch {}'],
+      { timeoutMs: 5000 }
+    ).catch(() => {});
 
     const { proc } = spawnStreamed('cmd.exe', ['/c', runCmd], { cwd: runnerDir }, (line, stream) => {
       if (line.trim()) this.stateHub.appendLog(`[Runner] ${line}`, stream === 'stderr' ? 'warn' : 'cyan');

@@ -260,6 +260,52 @@ function readBuildLogFile(cfg, targetFile) {
   }
 }
 
+const BUNDLED_SCRIPTS = [
+  'Run-UEBuild.ps1',
+  'Send-SlackReport.ps1',
+  'Send-DiscordReport.ps1',
+  'Sync-P4ToGitHub.ps1',
+  'Backup-P4Server.ps1',
+  'github_workflow_build.yml',
+  'github_workflow_p4_build.yml',
+  'author_map.example.json',
+  'UE_BuildManager.exe',
+];
+
+function syncBundledScriptsToLocal(configStore) {
+  if (!fs.existsSync(SCRIPTS_DIR)) return [];
+  const kitDir = configStore.getKitDir();
+  const deployed = [];
+  const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+
+  for (const f of BUNDLED_SCRIPTS) {
+    const src = path.join(kitDir, f);
+    const dst = path.join(SCRIPTS_DIR, f);
+    if (!fs.existsSync(src)) continue;
+    try {
+      if (f.endsWith('.ps1')) {
+        const raw = fs.readFileSync(src, 'utf8').replace(/^\uFEFF/, '');
+        const nextBuf = Buffer.concat([bom, Buffer.from(raw, 'utf8')]);
+        const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(nextBuf);
+        if (!same) {
+          fs.writeFileSync(dst, nextBuf);
+          deployed.push(f);
+        }
+      } else {
+        const srcBuf = fs.readFileSync(src);
+        const same = fs.existsSync(dst) && fs.readFileSync(dst).equals(srcBuf);
+        if (!same) {
+          fs.writeFileSync(dst, srcBuf);
+          deployed.push(f);
+        }
+      }
+    } catch {
+      // Ignore locked exe/file during silent startup auto-sync
+    }
+  }
+  return deployed;
+}
+
 function initBuildDirectories(configStore) {
   const cfg = configStore.get();
   const dirs = [
@@ -282,21 +328,9 @@ function initBuildDirectories(configStore) {
   }
 
   const kitDir = configStore.getKitDir();
-  const filesToCopy = [
-    'Run-UEBuild.ps1',
-    'Send-SlackReport.ps1',
-    'Send-DiscordReport.ps1',
-    'Sync-P4ToGitHub.ps1',
-    'Backup-P4Server.ps1',
-    'github_workflow_build.yml',
-    'github_workflow_p4_build.yml',
-    'author_map.example.json',
-    'UE_BuildManager.exe',
-  ];
-
   const deployed = [];
   const bom = Buffer.from([0xef, 0xbb, 0xbf]);
-  for (const f of filesToCopy) {
+  for (const f of BUNDLED_SCRIPTS) {
     const src = path.join(kitDir, f);
     const dst = path.join(SCRIPTS_DIR, f);
     if (fs.existsSync(src)) {
@@ -368,6 +402,7 @@ module.exports = {
   deletePackageFolder,
   getBuildHistory,
   readBuildLogFile,
+  syncBundledScriptsToLocal,
   initBuildDirectories,
   discoverIgnoredContentFolders,
   ensureAssetJunctions,

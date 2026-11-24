@@ -29,16 +29,21 @@ jobs:
   ue-build:
     name: UE Build (${{ github.ref_name }})
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
 
     env:
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       TAILSCALE_IP: ${{ vars.TAILSCALE_IP }}
 
     steps:
       - name: 1. 전용 PC 고정 워크스페이스 Git 동기화
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
+          $ErrorActionPreference = "Continue"
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $RepoName  = "${{ github.event.repository.name }}"
@@ -47,15 +52,19 @@ jobs:
           if (-not (Test-Path "$Workspace\.git")) {
               New-Item -ItemType Directory -Force -Path (Split-Path $Workspace) | Out-Null
               git -c safe.directory=* -c core.quotepath=false clone $CloneUrl $Workspace
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           Set-Location $Workspace
           git -c safe.directory=* remote set-url origin $CloneUrl
           git -c safe.directory=* -c core.quotepath=false fetch --all --prune
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git -c safe.directory=* -c core.quotepath=false checkout -f "${{ github.sha }}"
+          exit $LASTEXITCODE
 
-      - name: 2. 빌드 모드 결정 및 Run-UEBuild.ps1 실행 (로그 저장 & Slack 전송)
-        shell: powershell
+      - name: 2. 빌드 모드 결정 및 Run-UEBuild.ps1 실행 (로그 저장 & Slack/Discord 전송)
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
+          $ErrorActionPreference = "Continue"
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $RepoName  = "${{ github.event.repository.name }}"
@@ -74,3 +83,4 @@ jobs:
               -BuildMode $Mode `
               -BranchName "${{ github.ref_name }}" `
               -ProjectDir $Workspace
+          exit $LASTEXITCODE

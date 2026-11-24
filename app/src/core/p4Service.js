@@ -9,6 +9,16 @@ class P4Service {
     this.mirrorTimer = null;
     this.isMirrorRunning = false;
     this.isBackupRunning = false;
+    this.schedulerRegistered = false;
+  }
+
+  async refreshSchedulerStatus() {
+    const res = await execCapture('schtasks', ['/Query', '/TN', 'BuildServerKit_P4Mirror'], { timeoutMs: 4000 });
+    this.schedulerRegistered = res.code === 0;
+    this.stateHub.updateSection('mirror', {
+      schedulerRegistered: this.schedulerRegistered,
+    });
+    return this.schedulerRegistered;
   }
 
   _p4BaseArgs(cfg) {
@@ -197,12 +207,14 @@ class P4Service {
     this.stateHub.updateSection('mirror', {
       lastCL,
       autoEnabled: Boolean(this.mirrorTimer),
+      schedulerRegistered: Boolean(this.schedulerRegistered),
       running: this.isMirrorRunning,
     });
 
     return {
       ...this.stateHub.state.mirror,
       lastCL,
+      schedulerRegistered: Boolean(this.schedulerRegistered),
       assetLogFile,
       recentAssetLog,
     };
@@ -309,11 +321,20 @@ class P4Service {
       String(mins),
       '/F',
     ]);
+    if (res.code === 0) {
+      this.schedulerRegistered = true;
+      this.stateHub.updateSection('mirror', {
+        schedulerRegistered: true,
+        lastMessage: `Windows 작업 스케줄러 등록됨 (${mins}분 주기)`,
+      });
+      this.stateHub.appendLog(`✔ [P4 미러링 스케줄러] Windows 작업 스케줄러 등록 완료 (${mins}분 주기)`, 'success');
+    }
     return { ok: res.code === 0, message: (res.stdout || res.stderr).trim() };
   }
 
   async unregisterMirrorTaskScheduler() {
     const res = await execCapture('schtasks', ['/Delete', '/TN', 'BuildServerKit_P4Mirror', '/F']);
+    await this.refreshSchedulerStatus();
     return { ok: res.code === 0, message: (res.stdout || res.stderr).trim() };
   }
 

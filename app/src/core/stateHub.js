@@ -27,6 +27,7 @@ class StateHub {
       mirror: {
         running: false,
         autoEnabled: false,
+        schedulerRegistered: false,
         lastCL: 0,
         lastRunAt: null,
         lastStatus: 'idle',

@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛠️ BuildServerKit Studio `v2.1.4`
+# 🛠️ BuildServerKit Studio `v2.1.5`
 
 **여유 노트북(또는 전용 PC) 1대를 클릭 몇 번으로 Unreal Engine 5 올인원 빌드 서버로 만들어 주는 데스크톱 매니저**  
 *Perforce 하이브리드 자동 미러링 · GUI 원클릭 P4 서버 세팅 · GitHub Actions Self-Hosted Runner · 팀원 GitHub 프로필 연동 · 패키지 자동 보관 정리 · Discord/Slack 리포트 · Tailscale 원격 웹 대시보드*

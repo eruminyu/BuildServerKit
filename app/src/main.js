@@ -11,6 +11,7 @@ const {
   deletePackageFolder,
   getBuildHistory,
   readBuildLogFile,
+  syncBundledScriptsToLocal,
   initBuildDirectories,
   discoverIgnoredContentFolders,
   ensureAssetJunctions,
@@ -302,7 +303,10 @@ function registerIpcHandlers() {
   // Perforce & Mirror & Backup
   ipcMain.handle('p4:test', () => p4Service.testConnection());
   ipcMain.handle('p4:recentCLs', (_e, limit) => p4Service.getRecentCLs(limit || 12));
-  ipcMain.handle('p4:mirrorStatus', () => p4Service.getMirrorStatus());
+  ipcMain.handle('p4:mirrorStatus', async () => {
+    await p4Service.refreshSchedulerStatus();
+    return p4Service.getMirrorStatus();
+  });
   ipcMain.handle('p4:mirrorRun', (_e, opts) => p4Service.runMirrorOnce(opts || {}));
   ipcMain.handle('p4:registerMirrorTask', () => p4Service.registerMirrorTaskScheduler());
   ipcMain.handle('p4:unregisterMirrorTask', () => p4Service.unregisterMirrorTaskScheduler());
@@ -379,7 +383,12 @@ app.whenReady().then(async () => {
   setupTray();
   createMainWindow();
 
-  stateHub.appendLog('=== BuildServerKit Studio v2.0 (Perforce Hybrid + GitHub Actions + Tailscale) ===', 'cyan');
+  stateHub.appendLog(`=== BuildServerKit Studio v${app.getVersion()} (Perforce Hybrid + GitHub Actions + Tailscale) ===`, 'cyan');
+  const synced = syncBundledScriptsToLocal(configStore);
+  if (synced.length > 0) {
+    stateHub.appendLog(`✔ [자동 스크립트 최신화] C:\\BuildSystem\\Scripts 에 ${synced.length}개 파일 자동 반영 (${synced.join(', ')})`, 'success');
+  }
+  await p4Service.refreshSchedulerStatus();
   p4Service.getMirrorStatus();
   p4Service.syncAutoMirrorTimer();
   await githubService.getRunnerStatus();

@@ -50,6 +50,9 @@ jobs:
   ue-p4-build:
     name: UE5 P4 Build (${{ github.event_name }})
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
 
     env:
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -60,7 +63,7 @@ jobs:
     steps:
       - name: 1. Perforce CL 파싱 및 로컬 P4 초고속 동기화 (코드 + 대용량 에셋)
         id: p4sync
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         env:
           HEAD_COMMIT_MSG: ${{ github.event.head_commit.message }}
           HEAD_COMMIT_AUTHOR: ${{ github.event.head_commit.author.name }}
@@ -159,10 +162,11 @@ jobs:
           "project_dir=$ClientRoot"       | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "commit_author=$HeadAuthor"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "commit_msg=$FirstMsgLine"      | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit 0
 
       - name: 2. UE5 빌드·쿠킹·패키징 실행 (Run-UEBuild.ps1 -> 보관 개수 정리 + Slack/Discord 리포트)
         if: steps.p4sync.outputs.skip_build != 'true'
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command ". '{0}'"
         env:
           BUILD_MODE: ${{ steps.p4sync.outputs.build_mode }}
           TARGET_CL: ${{ steps.p4sync.outputs.target_cl }}

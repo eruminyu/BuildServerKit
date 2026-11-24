@@ -322,14 +322,20 @@
     }
 
     // Mirror status
+    const isAutoMirror = Boolean(mirror.autoEnabled || mirror.schedulerRegistered);
     const mirrorVal = mirror.lastCL ? `CL #${mirror.lastCL}` : 'CL #0';
     $('kpiMirrorVal').textContent = mirrorVal;
     $('mirrorLiveBadge').textContent = mirror.running ? '동기화 중...' : mirrorVal;
-    $('kpiMirrorBadge').textContent = mirror.running ? '실행 중' : mirror.autoEnabled ? '자동 ON' : '수동';
-    $('kpiMirrorBadge').className = mirror.running ? 'badge badge-blue' : mirror.autoEnabled ? 'badge badge-green' : 'badge badge-slate';
-    $('kpiMirrorSub').textContent = mirror.lastMessage || '대기 중';
-    $('navMirrorBadge').textContent = mirror.autoEnabled ? 'AUTO' : 'OFF';
-    $('navMirrorBadge').className = mirror.autoEnabled ? 'nav-badge ok' : 'nav-badge';
+    let mirrorBadgeText = '수동';
+    if (mirror.running) mirrorBadgeText = '실행 중';
+    else if (mirror.autoEnabled && mirror.schedulerRegistered) mirrorBadgeText = '자동 ON (앱+스케줄러)';
+    else if (mirror.schedulerRegistered) mirrorBadgeText = '스케줄러 ON';
+    else if (mirror.autoEnabled) mirrorBadgeText = '자동 ON';
+    $('kpiMirrorBadge').textContent = mirrorBadgeText;
+    $('kpiMirrorBadge').className = mirror.running ? 'badge badge-blue' : isAutoMirror ? 'badge badge-green' : 'badge badge-slate';
+    $('kpiMirrorSub').textContent = mirror.lastMessage || (mirror.schedulerRegistered ? 'Windows 작업 스케줄러 자동 실행 중' : '대기 중');
+    $('navMirrorBadge').textContent = mirror.schedulerRegistered && !mirror.autoEnabled ? 'SCHED' : isAutoMirror ? 'AUTO' : 'OFF';
+    $('navMirrorBadge').className = isAutoMirror ? 'nav-badge ok' : 'nav-badge';
 
     // Runner status
     let runnerLabel = '미설치';
