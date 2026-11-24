@@ -520,14 +520,16 @@ class P4Service {
     let passwordMsg = '';
     if (password && password.length > 0) {
       if (password.length < 8) {
-        throw new Error('Perforce 비밀번호는 최소 8자 이상이어야 합니다.');
+        throw new Error('Perforce 비밀번호는 최소 8자 이상이어야 합니다. (영문 대/소문자 + 숫자·특수문자 중 2종 이상 조합 권장)');
       }
       const pwRes = await execWithStdin('p4', [...base, 'passwd', targetId], `${password}\n${password}\n`, { timeoutMs: 8000 });
       if (pwRes.code !== 0) {
-        passwordMsg = ` (비밀번호 설정 경고: ${(pwRes.stderr || pwRes.stdout).trim()})`;
-      } else {
-        passwordMsg = ' · 비밀번호 설정 완료';
+        const rawErr = (pwRes.stderr || pwRes.stdout || '').trim();
+        throw new Error(
+          `계정은 저장되었으나 비밀번호 설정이 거부되었습니다 (P4D 보안 정책: 영문 대/소문자 + 숫자·특수문자 중 2종 이상 조합 8자 이상 필요). 상세: ${rawErr}`
+        );
       }
+      passwordMsg = ' · 비밀번호 설정 완료';
     }
 
     this.stateHub.appendLog(`✔ [P4 계정 저장] ${targetId} (${targetName} <${targetEmail}>)${passwordMsg}`, 'success');

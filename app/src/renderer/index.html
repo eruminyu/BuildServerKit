@@ -21,7 +21,7 @@
             </svg>
           </div>
           <span>BuildServerKit Studio</span>
-          <span class="brand-version">v2.1.5</span>
+          <span class="brand-version">v2.2.0</span>
         </div>
         <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
       </div>
@@ -891,8 +891,12 @@
                 <span class="field-hint">GitHub Settings → Emails에 등록된 이메일과 일치하면 잔디가 찍힙니다.</span>
               </div>
               <div class="field">
-                <label>Perforce 비밀번호 (신규 생성·변경 시만 입력 · 8자 이상)</label>
-                <input id="txtTeamPasswd" type="password" class="input mono" placeholder="비워두면 기존 비밀번호 유지" />
+                <label>Perforce 비밀번호 (신규 팀원 필수 · 영문+숫자 8자 이상)</label>
+                <div class="input-group">
+                  <input id="txtTeamPasswd" type="password" class="input mono" placeholder="신규: 영문+숫자 8자+ / 수정 시 비우면 유지" />
+                  <button id="btnTeamGenPass" class="btn btn-sm local-only" title="P4D 보안 정책 통과 비밀번호 자동생성">🎲 자동생성</button>
+                </div>
+                <span class="field-hint">⚠️ 신규 팀원 생성 시 반드시 영문+숫자 등 2종 이상 조합 8자 이상을 넣어야 P4V 첫 로그인이 성공합니다!</span>
               </div>
               <div class="field full">
                 <label>P4 계정 생성/수정에 사용할 관리자 P4 ID (super 권한)</label>
@@ -1127,9 +1131,10 @@
               <div class="field">
                 <label>빌드 대상 프로젝트 폴더 (ProjectDir)</label>
                 <div class="input-group">
-                  <input id="txtProjectDir" class="input mono" placeholder="P4 빌드 워크스페이스 또는 Git 클론 폴더" />
+                  <input id="txtProjectDir" class="input mono" placeholder="예: C:\BuildSystem\Workspace\MyProject" />
                   <button class="btn btn-sm pick-folder-btn local-only" data-target="txtProjectDir">찾아보기</button>
                 </div>
+                <span class="field-hint">⚠️ <code>C:\BuildSystem\Workspace\프로젝트명</code> 같은 전용 빈 폴더를 쓰세요. Perforce 서버 창고(P4ROOT)나 구 프로젝트 폴더 혼용 금지!</span>
               </div>
               <div class="field">
                 <label>아카이브 루트 (Logs / Packages)</label>
@@ -1261,13 +1266,21 @@
             <span>🔍 이 PC의 Unreal Engine 5, MSVC C++, Git, Perforce, Tailscale 설치 상태를 검사하는 중...</span>
           </div>
 
+          <div class="wiz-tip-box">
+            <div class="wiz-tip-title">💡 시작 전 알아두면 절대 안 헤매는 2가지</div>
+            <ul class="wiz-tip-list">
+              <li><strong>무료 5유저 절약:</strong> P4D 처음 설치 시 만드는 <code>super</code> 계정은 별도 <code>admin</code>으로 낭비하지 말고 <strong>관리자 + 본인 작업용 1개로 겸용</strong>하세요. (<code>본인 1 + 팀원 3 + p4bot 1 = 5/5명</code>)</li>
+              <li><strong>노트북 24시간 운영 팁:</strong> 전원 옵션에서 <em>덮개 닫기: 아무것도 안 함 · 절전: 안 함</em>, 제조사 앱에서 <em>배터리 최대 충전 50~80% 제한</em>을 권장합니다.</li>
+            </ul>
+          </div>
+
           <div id="wizDiagList" class="diag-list"></div>
         </div>
 
         <!-- STEP 2: Engine Path, Initial Folders & Package Retention -->
         <div id="wizPane2" class="wizard-step-pane">
           <div class="card" style="padding:14px 16px;">
-            <div class="card-title" style="margin-bottom:10px;">1) Unreal Engine 5 경로 &amp; 아카이브 폴더</div>
+            <div class="card-title" style="margin-bottom:10px;">1) Unreal Engine 5 · 빌드 전용 폴더 · 아카이브 경로</div>
             <div class="form-grid">
               <div class="field full">
                 <label>자동 감지된 Unreal Engine 5 선택 (없으면 아래에 직접 지정)</label>
@@ -1279,6 +1292,14 @@
                   <input id="wizUE5Root" class="input mono" placeholder="C:\Program Files\Epic Games\UE_5.x" />
                   <button class="btn btn-sm pick-folder-btn" data-target="wizUE5Root">찾아보기</button>
                 </div>
+              </div>
+              <div class="field full">
+                <label>빌드 전용 프로젝트 폴더 (ProjectDir — <code>ws-build-full</code> Root로 자동 연결)</label>
+                <div class="input-group">
+                  <input id="wizProjectDir" class="input mono" placeholder="예: C:\BuildSystem\Workspace\MyProject (새 폴더명 직접 입력)" />
+                  <button class="btn btn-sm pick-folder-btn" data-target="wizProjectDir">찾아보기</button>
+                </div>
+                <span class="field-hint">⚠️ <strong>Perforce 서버 원본 창고(P4ROOT, 예: C:\Perforce\Server)는 절대 지정 금지!</strong> 반드시 <code>C:\BuildSystem\Workspace\프로젝트명</code> 같은 독립 폴더를 지정하세요.</span>
               </div>
               <div class="field full">
                 <label>빌드 로그 · 패키징 결과물 보관함 (ArchiveRoot)</label>
@@ -1315,7 +1336,7 @@
           <div class="card" style="padding:14px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
             <div>
               <div class="card-title">3) 전용 PC 필수 폴더 &amp; 전체 스크립트 일괄 배치</div>
-              <div class="card-desc"><code>C:\BuildSystem\Scripts</code>, <code>C:\BuildArchive</code>, <code>C:\actions-runner</code>를 한 번에 생성하고 스크립트를 복사합니다.</div>
+              <div class="card-desc"><code>C:\BuildSystem\Scripts</code>, <code>C:\BuildArchive</code>, <code>C:\actions-runner</code>를 한 번에 생성하고 스크립트를 복사합니다. (추후 앱 업데이트 시 자동 최신화)</div>
             </div>
             <button id="btnWizInitDirs" class="btn btn-success">🛠 지금 폴더 &amp; 스크립트 배치</button>
           </div>
@@ -1323,6 +1344,15 @@
 
         <!-- STEP 3: GitHub Repo, Workflow & Runner -->
         <div id="wizPane3" class="wizard-step-pane">
+          <div class="wiz-tip-box">
+            <div class="wiz-tip-title">💡 GitHub 빈 저장소 준비 체크리스트 (처음 1회)</div>
+            <ul class="wiz-tip-list">
+              <li>GitHub에서 새 <strong>Private 저장소</strong> 생성 시: <code>README: On</code> · <code>.gitignore: UnrealEngine</code> · <code>License: None</code> 권장</li>
+              <li>생성 후 저장소 <strong>Settings → Collaborators</strong>에 팀원 GitHub 계정을 초대해 두세요.</li>
+              <li><strong>⚠️ 중요:</strong> UE5 프로젝트 파일은 GitHub에 직접 Push하지 말고, 4단계 이후 <strong>Perforce(P4V)에 Submit</strong>하면 자동으로 미러링됩니다!</li>
+            </ul>
+          </div>
+
           <div class="card" style="padding:14px 16px;">
             <div class="card-header" style="margin-bottom:8px;">
               <div>
@@ -1337,7 +1367,7 @@
             <div class="card-header" style="margin-bottom:8px;">
               <div>
                 <div class="card-title">2) GitHub Actions 워크플로우(<code>.github/workflows/build.yml</code>) 자동 등록</div>
-                <div id="wizWfDesc" class="card-desc">선택한 모드(Perforce 하이브리드)에 맞는 build.yml을 원클릭으로 저장소에 Push합니다.</div>
+                <div id="wizWfDesc" class="card-desc">선택한 모드(Perforce 하이브리드)에 맞는 build.yml을 원클릭으로 저장소에 Push합니다. (PowerShell ExecutionPolicy Bypass · <code>[skip ci]</code> · <code>paths-ignore</code> 내장)</div>
               </div>
               <button id="btnWizPushWf" class="btn btn-primary">★ build.yml 자동 등록</button>
             </div>
@@ -1363,11 +1393,19 @@
         <div id="wizPane4" class="wizard-step-pane">
           <!-- Sub-pane for Perforce Hybrid -->
           <div id="wizP4Box" style="display:flex; flex-direction:column; gap:12px;">
+            <div class="card featured" style="padding:14px 16px;">
+              <div class="card-header" style="margin-bottom:6px;">
+                <div class="card-title">① 먼저 서버가 처음이라면 — GUI Perforce 원클릭 세팅</div>
+                <button id="btnWizOpenP4Provision" class="btn btn-sm btn-primary">⚡ Perforce 원클릭 세팅 열기 →</button>
+              </div>
+              <div class="card-desc">P4D 설치 → Unicode 전환 → 방화벽(1666/3780) → Stream 디포 → UE5 Typemap(+l) → <code>p4bot</code> 무기한 티켓 → 전용 워크스페이스(<code>ws-build-full</code> / <code>ws-mirror-code</code>) 생성까지 버튼 클릭만으로 끝냅니다. 완료 후 다시 이 4단계로 돌아오세요!</div>
+            </div>
+
             <div class="card" style="padding:14px 16px;">
               <div class="card-header" style="margin-bottom:10px;">
                 <div>
-                  <div class="card-title">Perforce 연결 &amp; 자동화 계정 (Read-Only <code>p4bot</code> 권장)</div>
-                  <div class="card-desc">팀원 4인 이하라면 5번째 계정으로 <code>p4bot</code>(Read-Only)을 쓰고, 5인 팀이라면 관리자 계정 ID를 입력하세요.</div>
+                  <div class="card-title">② Perforce 연결 · 워크스페이스 확인 &amp; 미러링 시작</div>
+                  <div class="card-desc">워크스페이스 이름(<code>ws-build-full</code> / <code>ws-mirror-code</code>)은 기본값 그대로 두는 것이 정석입니다.</div>
                 </div>
                 <button id="btnWizP4Test" class="btn btn-sm btn-violet">연결 &amp; 티켓 진단</button>
               </div>
@@ -1377,11 +1415,11 @@
                   <input id="wizP4Port" class="input mono" placeholder="localhost:1666" />
                 </div>
                 <div class="field">
-                  <label>P4USER</label>
+                  <label>P4USER (자동화 계정)</label>
                   <input id="wizP4User" class="input mono" placeholder="p4bot" />
                 </div>
                 <div class="field full">
-                  <label>P4Stream</label>
+                  <label>미러링·빌드 대상 Stream (P4Stream)</label>
                   <input id="wizP4Stream" class="input mono" placeholder="//MyProject/main" />
                 </div>
                 <div class="field">
@@ -1396,17 +1434,22 @@
               <div id="wizP4DiagOut" class="feed-item" style="margin-top:10px; display:none;"></div>
               <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
                 <button id="btnWizCloneMirror" class="btn">[1] 미러 Git 저장소 최초 Clone</button>
-                <button id="btnWizInitWm" class="btn">[2] 현재 HEAD로 워터마크 초기화</button>
-                <button id="btnWizRegMirrorTask" class="btn btn-primary">[3] 자동 미러링 작업 스케줄러 등록</button>
+                <button id="btnWizRegMirrorTask" class="btn btn-primary">[2] Windows 자동 미러링 스케줄러 등록 (앱 꺼져도 동작)</button>
+                <button id="btnWizInitWm" class="btn btn-ghost" title="기존에 수십 개 CL이 쌓인 서버에서 과거 이력을 건너뛸 때만 클릭">선택: 과거 CL 건너뛰기 (워터마크 초기화)</button>
+              </div>
+              <div class="wiz-tip-box warn" style="margin-top:10px;">
+                <div class="wiz-tip-title">📌 "워터마크 초기화"는 언제 누르나요?</div>
+                아직 UE5 프로젝트를 올리지 않은 <strong>신규 서버라면 누르지 마세요!</strong> (그대로 둬야 첫 <code>CL #1</code>부터 자동 미러링됩니다.) 이미 과거 CL이 수십 개 쌓인 기존 서버에서 과거 기록을 건너뛰고 싶을 때만 사용합니다.
               </div>
             </div>
 
-            <div class="card" style="padding:14px 16px;">
-              <div class="card-header" style="margin-bottom:6px;">
-                <div class="card-title">⚡ 터미널 없이 GUI로 Perforce 서버 한 번에 세팅하기</div>
-                <button id="btnWizOpenP4Provision" class="btn btn-sm btn-primary">Perforce 원클릭 세팅 열기 →</button>
-              </div>
-              <div class="card-desc">P4D 설치, Unicode 전환, 방화벽 개방, Stream 디포, UE5 Typemap(+l), <code>p4bot</code> 무기한 티켓, 전용 워크스페이스 생성을 모두 버튼 클릭만으로 끝낼 수 있습니다.</div>
+            <div class="wiz-tip-box ok">
+              <div class="wiz-tip-title">⚡ 자동 빌드 분기 조건 한눈에 보기</div>
+              <ul class="wiz-tip-list">
+                <li><strong>일반 <code>//프로젝트/main</code> Submit / 병합:</strong> ⚡ <strong>QuickVerify</strong> (컴파일 + 증분 쿠킹, SSD 보호)</li>
+                <li><strong>Submit 메시지에 <code>[package]</code> 또는 <code>[release]</code> 포함:</strong> 📦 <strong>FullPackage</strong> (전체 <code>.pak</code> 패키징 + 런처 동봉 + 최신 10개 유지)</li>
+                <li><strong>개인 개발 스트림(<code>dev-*</code>) Submit:</strong> 미러링·빌드 생략 → <strong><code>main</code>으로 병합할 때만</strong> 자동 검증 실행!</li>
+              </ul>
             </div>
           </div>
 
@@ -1472,8 +1515,17 @@
             </div>
           </div>
 
-          <div class="diag-summary-banner ok" id="wizFinalBanner">
-            <span>🎉 설정이 준비되었습니다! <strong>[설정 완료하고 시작하기]</strong>를 누르면 대시보드로 이동합니다. (좌측 하단 [✨ 설정 마법사] 버튼으로 언제든 다시 열 수 있습니다.)</span>
+          <div class="wiz-tip-box ok" id="wizFinalBanner">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+              <div class="wiz-tip-title" style="margin-bottom:0;">🎯 마법사 완료 후, 첫 자동 빌드까지 딱 4단계!</div>
+              <button id="btnWizOpenTeam" class="btn btn-sm btn-primary">👥 팀원 &amp; 계정 관리 바로 열기 →</button>
+            </div>
+            <ol class="wiz-tip-list">
+              <li><strong>팀원 등록:</strong> <code>[팀원 &amp; 계정 관리]</code>에서 본인·팀원 GitHub 링크 입력 후 저장 (<strong>비밀번호는 영문+숫자 8자 이상 필수!</strong>) → <code>[P4V 접속 가이드 복사]</code>로 전달</li>
+              <li><strong>작업 PC P4V 연결:</strong> 워크스페이스 생성 시 <strong><code>Stream:</code> 칸을 절대 비우지 말고</strong> <code>//프로젝트/main</code> 선택 + <code>Advanced → Rmdir</code> 체크</li>
+              <li><strong>최초 프로젝트 Submit:</strong> 워크스페이스 Root 바로 아래에 UE5 프로젝트 + <code>.p4ignore</code> 배치 → P4V 루트 우클릭 <strong><code>Reconcile Offline Work</code></strong> (<code>Apply P4IGNORE</code> 체크!) → <strong><code>Submit</code></strong></li>
+              <li><strong>자동화 확인:</strong> 2분 대기(또는 대시보드 <code>[↻ P4 미러링 지금 실행]</code>) → GitHub 잔디 &amp; Actions <strong><code>QuickVerify</code> ✅</strong> + Discord/Slack 알림 도착!</li>
+            </ol>
           </div>
         </div>
       </div>

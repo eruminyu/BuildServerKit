@@ -1365,12 +1365,21 @@
       `1. Tailscale 설치 후 초대받은 팀 네트워크 로그인`,
       `2. P4V(Helix Visual Client) 설치 후 아래 정보로 연결:`,
       `   - Server: ${ip}:${port}`,
-      `   - User: ${p4Id}`,
+      `   - User: ${p4Id}  (⚠️ 대소문자 정확히! 기본 Windows 계정명을 지우고 입력)`,
       `   - Character Encoding: UTF-8 (필수!)`,
-      `   - Workspace Stream: ${stream}`,
-      `3. UE5 에디터 우측 하단 [Revision Control] -> Perforce 선택 후 동일 정보 연결`,
-      `4. 실시간 빌드 현황(브라우저): ${webUrl}`,
-      `5. 완성 빌드/로그 공유폴더(탐색기): \\\\${ip}\\BuildArchive`,
+      `   - Workspace: New... 클릭 -> [Stream:] 칸을 절대 비워두지 말고 '${stream}' (또는 본인 dev 스트림) 선택!`,
+      `   - Workspace 설정 -> [Advanced] 탭에서 'Rmdir' 체크 권장 (삭제된 빈 폴더 자동 정리)`,
+      `3. 평소 작업 루틴: 작업 전 [Get Latest] -> 작업 후 P4V 루트 우클릭 [Reconcile Offline Work] (Apply P4IGNORE 체크) -> [Submit]`,
+      `4. UE5 에디터 우측 하단 [Revision Control] -> Perforce 선택 후 동일 정보 연결 (에셋 자동 독점 잠금)`,
+      `5. 자동 빌드 규칙: main 일반 Submit = 빠른 검증(QuickVerify) / 설명에 [package] 포함 = 전체 패키징(FullPackage)`,
+      `6. 실시간 빌드 현황(브라우저): ${webUrl}`,
+      `7. 완성 빌드/로그 공유폴더(탐색기): \\\\${ip}\\BuildArchive`,
+      ``,
+      `[로그인 안 되거나 UTF-8 에러 시 PowerShell 초기화 4줄]`,
+      `p4 set P4PORT=${ip}:${port}`,
+      `p4 set P4USER=${p4Id}`,
+      `p4 set P4CHARSET=utf8`,
+      `p4 login`,
     ].join('\n');
   }
 
@@ -1721,6 +1730,14 @@
     toast(`'${p4User}' 팀원용 P4V 접속 가이드가 클립보드에 복사되었습니다!`, 'success');
   });
 
+  $('btnTeamGenPass')?.addEventListener('click', () => {
+    const pw = generateStrongBotPassword();
+    $('txtTeamPasswd').type = 'text';
+    $('txtTeamPasswd').value = pw;
+    navigator.clipboard.writeText(pw).catch(() => {});
+    toast('P4D 보안 정책을 통과하는 팀원 비밀번호를 생성하고 클립보드에 복사했습니다!', 'success');
+  });
+
   // ---------------------------------------------------------------------------
   // First-Run & On-Demand Setup Wizard + PC Environment Diagnostics
   // ---------------------------------------------------------------------------
@@ -1734,6 +1751,7 @@
     });
 
     $('wizUE5Root').value = cfg.UE5Root || '';
+    $('wizProjectDir').value = cfg.ProjectDir || '';
     $('wizArchiveRoot').value = cfg.ArchiveRoot || 'C:\\BuildArchive';
     $('wizEnableRetain').checked = Boolean(cfg.EnablePackageRetention);
     $('wizMaxPkgs').value = cfg.MaxRetainedPackages || 10;
@@ -1944,6 +1962,7 @@
     const partial = {
       VcsMode: activeWizVcs ? activeWizVcs.dataset.mode : cfg.VcsMode,
       UE5Root: $('wizUE5Root').value.trim(),
+      ProjectDir: $('wizProjectDir').value.trim(),
       ArchiveRoot: $('wizArchiveRoot').value.trim() || 'C:\\BuildArchive',
       EnablePackageRetention: $('wizEnableRetain').checked,
       MaxRetainedPackages: Math.max(1, Math.min(200, Number($('wizMaxPkgs').value) || 10)),
@@ -2071,6 +2090,17 @@
     closeModal('modalWizard');
     switchView('perforce');
     document.querySelector('.content-area')?.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  $('btnWizOpenTeam')?.addEventListener('click', async () => {
+    await saveWizardProgress();
+    const saved = await safeCall(() => api.invoke('wizard:complete', { completed: true }));
+    if (saved) {
+      cfg = saved;
+      hydrateConfigToUI();
+    }
+    closeModal('modalWizard');
+    switchView('team');
+    refreshTeamTab();
   });
   $('btnWizGitClone')?.addEventListener('click', async () => {
     const r = await safeCall(() => api.invoke('github:clone'));

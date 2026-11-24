@@ -564,6 +564,21 @@ foreach ($r in $rules) {
     const mClient = (mirrorClient || cfg.P4MirrorClient || 'ws-mirror-code').trim();
     const mRoot = (mirrorRoot || cfg.P4MirrorDir || 'C:\\BuildSystem\\P4MirrorRepo').trim();
 
+    // Guardrail: never allow P4D server depot root (P4ROOT) as a build workspace folder
+    const normBuild = path.resolve(bRoot).toLowerCase();
+    const normDepot = cfg.P4DepotRoot ? path.resolve(cfg.P4DepotRoot).toLowerCase() : '';
+    const looksLikeP4Root =
+      (normDepot && (normBuild === normDepot || normBuild.startsWith(normDepot + path.sep))) ||
+      fs.existsSync(path.join(bRoot, 'db.have')) ||
+      fs.existsSync(path.join(bRoot, 'db.rev')) ||
+      fs.existsSync(path.join(bRoot, 'db.domain'));
+    if (looksLikeP4Root) {
+      throw new Error(
+        `빌드 프로젝트 폴더(${bRoot})에 Perforce 서버 원본 디포(P4ROOT) 경로를 지정할 수 없습니다! ` +
+          `C:\\BuildSystem\\Workspace\\${depotName} 같은 별도 전용 폴더를 지정해 주세요.`
+      );
+    }
+
     fs.mkdirSync(bRoot, { recursive: true });
     fs.mkdirSync(mRoot, { recursive: true });
 
@@ -648,7 +663,23 @@ foreach ($r in $rules) {
       this.configStore.save({ P4User: adminUser });
     }
 
-    const s4 = await this.createStandardWorkspaces({ adminUser, stream: s1.stream });
+    const cfg = this.configStore.get();
+    const cleanDepot = String(depotName || 'MyProject').trim().replace(/^\/+|\/+$/g, '');
+    const defaultDepotBuildRoot = path.join(cfg.WorkspaceRoot || 'C:\\BuildSystem\\Workspace', cleanDepot);
+    // Avoid accidentally reusing a previous different project's workspace folder when provisioning a new depot
+    let chosenBuildRoot = cfg.ProjectDir || defaultDepotBuildRoot;
+    if (cfg.ProjectDir && path.basename(cfg.ProjectDir).toLowerCase() !== cleanDepot.toLowerCase()) {
+      try {
+        const hasOtherUproject =
+          fs.existsSync(cfg.ProjectDir) &&
+          fs.readdirSync(cfg.ProjectDir).some((f) => f.toLowerCase().endsWith('.uproject'));
+        if (hasOtherUproject || !fs.existsSync(cfg.ProjectDir)) {
+          chosenBuildRoot = defaultDepotBuildRoot;
+        }
+      } catch {}
+    }
+
+    const s4 = await this.createStandardWorkspaces({ adminUser, stream: s1.stream, buildRoot: chosenBuildRoot });
     const s5 = await this.createUe5P4Ignore(s4.buildRoot);
 
     this.stateHub.appendLog('🎉 === [Perforce 원클릭 일괄 자동 세팅 모두 완료!] ===', 'success');

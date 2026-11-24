@@ -1382,6 +1382,48 @@ tr:hover td {
   color: #ffffff;
 }
 
+.wiz-tip-box {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.08);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.wiz-tip-box.warn {
+  border-color: rgba(245, 158, 11, 0.38);
+  background: rgba(245, 158, 11, 0.09);
+  color: #fde68a;
+}
+.wiz-tip-box.ok {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.09);
+  color: #d1fae5;
+}
+.wiz-tip-title {
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  font-size: 12.5px;
+}
+.wiz-tip-box.warn .wiz-tip-title {
+  color: #fcd34d;
+}
+.wiz-tip-box.ok .wiz-tip-title {
+  color: #6ee7b7;
+}
+.wiz-tip-list {
+  margin: 4px 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wiz-tip-list li strong {
+  color: var(--text-primary);
+}
+
 .wiz-cheatsheet {
   margin-top: 8px;
   border-radius: 10px;

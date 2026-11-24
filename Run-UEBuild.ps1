@@ -78,12 +78,18 @@ if (-not (Test-Path $RunUAT)) {
     exit 1
 }
 
-# 프로젝트 폴더 내 *.uproject 자동 탐색
-$UProjectItem = Get-ChildItem -Path $ProjectDir -Filter "*.uproject" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $UProjectItem) {
-    Write-Error "워크스페이스 경로에서 .uproject 파일을 찾을 수 없습니다: $ProjectDir"
+# 프로젝트 폴더 내 *.uproject 자동 탐색 (2개 이상 혼재 시 명확한 안내 출력)
+$UProjectItems = @(Get-ChildItem -Path $ProjectDir -Filter "*.uproject" -File -ErrorAction SilentlyContinue)
+if ($UProjectItems.Count -eq 0) {
+    Write-Error "워크스페이스 경로에서 .uproject 파일을 찾을 수 없습니다: $ProjectDir`n  -> [알림·설정]의 프로젝트 폴더(ProjectDir)가 ws-build-full의 Root와 일치하는지 확인하고, 'p4 -p localhost:1666 -u p4bot -c ws-build-full sync -f //...#head'로 동기화하세요."
     exit 1
 }
+if ($UProjectItems.Count -gt 1) {
+    $Names = ($UProjectItems | ForEach-Object { $_.Name }) -join ", "
+    Write-Error "프로젝트 폴더($ProjectDir) 안에 .uproject 파일이 여러 개 섞여 있습니다: $Names`n  -> 이전 프로젝트 잔여 파일이 남아 있어 UAT 빌드가 충돌합니다. 폴더를 비운 뒤 'p4 -p localhost:1666 -u p4bot -c ws-build-full sync -f //...#head'로 깨끗하게 재동기화하세요."
+    exit 1
+}
+$UProjectItem = $UProjectItems[0]
 $UProjectFile = $UProjectItem.FullName
 $ProjectName  = $UProjectItem.BaseName
 
