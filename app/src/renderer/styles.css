@@ -1542,3 +1542,118 @@ tr:hover td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ==================== ADMIN SESSION BANNER & P4 LOGS ==================== */
+.p4-auth-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 13px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.09);
+}
+.p4-auth-banner.error {
+  border-color: rgba(244, 63, 94, 0.45);
+  background: rgba(244, 63, 94, 0.1);
+}
+.p4-auth-banner.ok {
+  border-color: rgba(16, 185, 129, 0.32);
+  background: rgba(16, 185, 129, 0.07);
+}
+.p4-auth-banner-main {
+  flex: 1;
+  min-width: 260px;
+}
+.p4-auth-banner-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fde68a;
+}
+.p4-auth-banner.error .p4-auth-banner-title {
+  color: #fda4af;
+}
+.p4-auth-banner.ok .p4-auth-banner-title {
+  color: #6ee7b7;
+}
+.p4-auth-banner-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.p4-auth-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+body.remote-mode .local-only-wrap {
+  display: none !important;
+}
+
+.p4log-live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.p4log-live-toggle input {
+  accent-color: var(--accent-green);
+}
+.p4log-client-row {
+  cursor: pointer;
+}
+.p4log-entry {
+  display: flex;
+  gap: 10px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.p4log-entry.error {
+  background: rgba(244, 63, 94, 0.09);
+  color: #fda4af;
+}
+.p4log-entry.auth_fail {
+  background: rgba(245, 158, 11, 0.13);
+  color: #fcd34d;
+  font-weight: 600;
+}
+.p4log-entry.warn {
+  color: #fbbf24;
+}
+.p4log-entry.admin .log-txt {
+  color: #c4b5fd;
+}
+.p4log-tag {
+  display: inline-block;
+  min-width: 58px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+.p4log-entry.error .p4log-tag {
+  background: rgba(244, 63, 94, 0.25);
+  color: #fda4af;
+}
+.p4log-entry.auth_fail .p4log-tag {
+  background: rgba(245, 158, 11, 0.28);
+  color: #fde68a;
+}
+.p4log-entry.admin .p4log-tag {
+  background: rgba(139, 92, 246, 0.22);
+  color: #d8b4fe;
+}

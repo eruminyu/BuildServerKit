@@ -18,6 +18,7 @@ const {
 } = require('./core/systemService');
 const { P4Service } = require('./core/p4Service');
 const { P4ProvisionService } = require('./core/p4ProvisionService');
+const { P4LogService } = require('./core/p4LogService');
 const { BuildService } = require('./core/buildService');
 const { GitHubService } = require('./core/githubService');
 const { RemoteWebServer } = require('./core/webServer');
@@ -34,12 +35,13 @@ const rendererDir = path.join(__dirname, 'renderer');
 
 const configStore = new ConfigStore(kitDir);
 const stateHub = new StateHub();
-const p4Service = new P4Service(configStore, stateHub);
-const p4ProvisionService = new P4ProvisionService(configStore, stateHub);
+const p4LogService = new P4LogService(configStore, stateHub);
+const p4Service = new P4Service(configStore, stateHub, p4LogService);
+const p4ProvisionService = new P4ProvisionService(configStore, stateHub, p4LogService);
 const buildService = new BuildService(configStore, stateHub, p4Service);
 const githubService = new GitHubService(configStore, stateHub, buildService);
 const ueProjectService = new UEProjectService(configStore, stateHub);
-const webServer = new RemoteWebServer({ rendererDir, configStore, stateHub, buildService, p4Service });
+const webServer = new RemoteWebServer({ rendererDir, configStore, stateHub, buildService, p4Service, p4LogService });
 
 // Single-instance lock so 24/7 laptop never spawns duplicate runner/mirror managers
 const gotLock = app.requestSingleInstanceLock();
@@ -320,6 +322,20 @@ function registerIpcHandlers() {
   ipcMain.handle('p4:team:upsertUser', (_e, payload) => p4Service.upsertP4User(payload || {}));
   ipcMain.handle('p4:team:deleteUser', (_e, payload) => p4Service.deleteP4User(payload || {}));
   ipcMain.handle('p4:team:lockAutoCreate', (_e, { adminUser } = {}) => p4Service.lockAutoUserCreate(adminUser || ''));
+  ipcMain.handle('p4:team:extendTimeout', (_e, payload) => p4Service.extendSessionTimeout(payload || {}));
+
+  // Perforce Server Log Recording & Inspection
+  ipcMain.handle('p4:logs:config', (_e, { adminUser } = {}) => p4LogService.inspectLogConfig(adminUser || ''));
+  ipcMain.handle('p4:logs:read', (_e, payload) => p4LogService.readServerLog(payload || {}));
+  ipcMain.handle('p4:logs:configure', (_e, payload) => p4LogService.configureServerLogging(payload || {}));
+  ipcMain.handle('p4:logs:snapshot', (_e, payload) => p4LogService.exportLogSnapshot(payload || {}));
+  ipcMain.handle('p4:logs:syncDepotRoot', async (_e, { serverRoot } = {}) => {
+    const root = String(serverRoot || '').trim();
+    if (!root) throw new Error('감지된 P4ROOT 경로가 없습니다.');
+    const updated = configStore.save({ P4DepotRoot: root });
+    p4LogService.appendAuditLog('CONFIG', 'info', `P4DepotRoot 자동 동기화: ${root}`);
+    return updated;
+  });
 
   // Perforce Full GUI Provisioning (Install -> Unicode/Firewall -> Stream -> Typemap -> p4bot -> Workspaces -> .p4ignore)
   ipcMain.handle('p4prov:status', (_e, { adminUser } = {}) => p4ProvisionService.inspectStatus(adminUser || ''));

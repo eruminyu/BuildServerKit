@@ -95,6 +95,11 @@
       refreshProvStatus();
     }
     if (viewId === 'team') refreshTeamTab();
+    if (viewId === 'p4logs') {
+      refreshP4Logs();
+    } else if (typeof stopP4LogLiveTimer === 'function') {
+      stopP4LogLiveTimer();
+    }
   }
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
@@ -802,8 +807,9 @@
     if (res.ok) {
       box.innerHTML = `
         <div style="color:#34d399; font-weight:700;">✔ Perforce 서버 연결 성공 (${escapeHtml(res.serverAddress || cfg.P4Port)})</div>
-        <div style="margin-top:4px;">• 버전: ${escapeHtml(res.serverVersion)} · Unicode: <strong>${res.unicodeMode ? '활성화됨' : '미감지'}</strong></div>
+        <div style="margin-top:4px;">• 버전: ${escapeHtml(res.serverVersion)} · Unicode: <strong>${res.unicodeMode ? '활성화됨' : '미감지'}</strong>${res.serverUptime ? ` · 가동시간: ${escapeHtml(res.serverUptime)}` : ''}</div>
         <div>• 티켓 상태: ${res.ticketOk ? `<span style="color:#34d399;">유효 (${escapeHtml(res.ticketMessage)})</span>` : `<span style="color:#fbbf24;">확인 필요 (${escapeHtml(res.ticketMessage)})</span>`}</div>
+        ${res.serverRoot ? `<div>• 실제 P4ROOT: <code>${escapeHtml(res.serverRoot)}</code></div>` : ''}
         <div>• 빌드 Root: <code>${escapeHtml(res.buildRoot || '미조회')}</code> / 미러 Root: <code>${escapeHtml(res.mirrorRoot || '미조회')}</code></div>`;
       if (res.buildRoot && !cfg.ProjectDir) {
         $('txtProjectDir').value = res.buildRoot;
@@ -1101,7 +1107,12 @@
     setProvPill('ppService', st.serverReachable || st.serviceRunning, 'P4D 실행 중', st.serviceInstalled ? 'P4D 중지됨' : 'P4D 미설치');
     setProvPill('ppUnicode', st.unicodeEnabled, 'Unicode ON', 'Unicode OFF');
     setProvPill('ppFirewall', st.firewallOpen, '방화벽(1666) 열림', '방화벽 미개방');
-    setProvPill('ppAdmin', st.adminLoggedIn, `관리자 로그인(${st.adminUser})`, `관리자 로그인 필요`);
+    setProvPill(
+      'ppAdmin',
+      st.adminLoggedIn,
+      `관리자 로그인(${st.adminUser})`,
+      st.serverReachable && st.adminUser ? `관리자 세션 만료(${st.adminUser})` : '관리자 로그인 필요'
+    );
     setProvPill('ppStream', st.streamExists, 'Stream 디포 준비됨', 'Stream 미생성');
     setProvPill('ppTypemap', st.typemapApplied, 'UE5 Typemap(+l) 적용됨', 'Typemap 미적용');
     setProvPill('ppBot', st.botTicketValid, `봇 티켓 유효(${cfg.P4User || 'p4bot'})`, '봇 티켓 미발급');
@@ -1426,26 +1437,77 @@
     $('teamWsQuotaBadge').textContent = !teamP4State.connected ? 'P4 미연결' : wsCount > 20 ? '한도 초과!' : '정상';
     $('teamWsQuotaBadge').className = !teamP4State.connected ? 'badge badge-slate' : wsCount > 20 ? 'badge badge-rose' : 'badge badge-green';
 
-    $('teamAutoCreateBadge').textContent = !teamP4State.connected
-      ? '미확인'
-      : teamP4State.noAutoCreateLocked
-        ? '차단됨 (안전)'
-        : '허용 중 (권장: 차단)';
-    $('teamAutoCreateBadge').className = !teamP4State.connected
-      ? 'badge badge-slate'
-      : teamP4State.noAutoCreateLocked
-        ? 'badge badge-green'
-        : 'badge badge-amber';
-    $('btnLockAutoCreate').style.display = teamP4State.noAutoCreateLocked ? 'none' : 'inline-flex';
+    const autoStatus = teamP4State.noAutoCreateStatus || (teamP4State.connected ? (teamP4State.noAutoCreateLocked ? 'locked' : 'open') : 'offline');
+    if (autoStatus === 'locked') {
+      $('teamAutoCreateBadge').textContent = '차단됨 (안전)';
+      $('teamAutoCreateBadge').className = 'badge badge-green';
+      $('btnLockAutoCreate').style.display = 'none';
+    } else if (autoStatus === 'open') {
+      $('teamAutoCreateBadge').textContent = '허용 중 (권장: 차단)';
+      $('teamAutoCreateBadge').className = 'badge badge-amber';
+      $('btnLockAutoCreate').style.display = 'inline-flex';
+    } else if (autoStatus === 'unknown_need_admin') {
+      $('teamAutoCreateBadge').textContent = '관리자 로그인 필요';
+      $('teamAutoCreateBadge').className = 'badge badge-slate';
+      $('btnLockAutoCreate').style.display = 'inline-flex';
+    } else {
+      $('teamAutoCreateBadge').textContent = '미확인';
+      $('teamAutoCreateBadge').className = 'badge badge-slate';
+      $('btnLockAutoCreate').style.display = 'none';
+    }
 
     // Auto-fill Admin User input once if empty
     if (!$('txtTeamAdminUser').value.trim()) {
       $('txtTeamAdminUser').value = teamP4State.activeSystemUser || (cfg.P4User !== 'p4bot' ? cfg.P4User : '') || 'p4murmur';
     }
 
-    $('teamRosterSubtitle').textContent = teamP4State.connected
-      ? `Perforce 서버(${cfg.P4Port}) 유저 ${uCount}명과 로컬 잔디 매핑 ${authorMapRows.length}건을 통합 표시합니다.`
-      : `Perforce 서버에 아직 연결되지 않아 로컬 author_map.json(${authorMapRows.length}건)만 표시 중입니다.`;
+    // Render Admin Session Health / Auth Error Banner
+    const authBanner = $('teamAuthBanner');
+    if (authBanner) {
+      const adminId = $('txtTeamAdminUser').value.trim() || teamP4State.adminUser || '';
+      if (!teamP4State.connected) {
+        authBanner.style.display = 'flex';
+        authBanner.className = 'p4-auth-banner error';
+        $('teamAuthBannerTitle').textContent = `✖ Perforce 서버(${cfg.P4Port})에 연결할 수 없습니다`;
+        $('teamAuthBannerDesc').textContent = teamP4State.error || 'Helix Core Server(P4D) 서비스가 실행 중인지 확인해 주세요.';
+        $('teamQuickLoginRow').style.display = 'none';
+      } else if (teamP4State.error) {
+        authBanner.style.display = 'flex';
+        authBanner.className = 'p4-auth-banner error';
+        $('teamAuthBannerTitle').textContent = `⚠ Perforce 유저 목록 조회 실패 — 로그인 세션 만료 또는 권한 오류`;
+        $('teamAuthBannerDesc').textContent = `서버(${cfg.P4Port}) 연결은 정상이지만 조회 계정의 티켓이 만료되었습니다. 상세: ${teamP4State.error}`;
+        $('teamQuickLoginRow').style.display = 'flex';
+        $('txtTeamQuickAdminPass').style.display = '';
+        $('btnTeamQuickAdminLogin').style.display = '';
+      } else if (teamP4State.authWarning) {
+        authBanner.style.display = 'flex';
+        authBanner.className = 'p4-auth-banner';
+        $('teamAuthBannerTitle').textContent = `⚠ 관리자(${adminId}) 로그인 세션 만료됨 (기본 12시간) — '${teamP4State.queriedAs}' 계정으로 목록 표시 중`;
+        $('teamAuthBannerDesc').textContent = `팀원 계정 상태·이메일은 정상 조회되고 있습니다. 신규 팀원 생성/비밀번호 설정을 하려면 우측에서 관리자로 재로그인하세요. (재로그인 후 [12시간 만료 해제]를 누르면 이후 만료되지 않습니다.)`;
+        $('teamQuickLoginRow').style.display = 'flex';
+        $('txtTeamQuickAdminPass').style.display = '';
+        $('btnTeamQuickAdminLogin').style.display = '';
+      } else if (teamP4State.adminTicketValid) {
+        authBanner.style.display = 'flex';
+        authBanner.className = 'p4-auth-banner ok';
+        $('teamAuthBannerTitle').textContent = `✔ 관리자(${adminId}) Perforce 세션 유효`;
+        $('teamAuthBannerDesc').textContent = teamP4State.adminTicketMessage || '계정 생성·수정 및 비밀번호 변경을 바로 수행할 수 있습니다.';
+        $('teamQuickLoginRow').style.display = 'flex';
+        $('txtTeamQuickAdminPass').style.display = 'none';
+        $('btnTeamQuickAdminLogin').style.display = 'none';
+      } else {
+        authBanner.style.display = 'none';
+      }
+    }
+
+    if (!teamP4State.connected) {
+      $('teamRosterSubtitle').textContent = `Perforce 서버에 아직 연결되지 않아 로컬 author_map.json(${authorMapRows.length}건)만 표시 중입니다.`;
+    } else if (teamP4State.error) {
+      $('teamRosterSubtitle').textContent = `⚠ Perforce 서버(${cfg.P4Port}) 연결됨 — 단, 로그인 세션 만료로 유저 목록을 불러오지 못했습니다. 위 배너에서 관리자로 재로그인하세요.`;
+    } else {
+      const via = teamP4State.queriedAs ? ` · 조회 계정: ${teamP4State.queriedAs}` : '';
+      $('teamRosterSubtitle').textContent = `Perforce 서버(${cfg.P4Port}) 유저 ${uCount}명과 로컬 잔디 매핑 ${authorMapRows.length}건을 통합 표시합니다.${via}`;
+    }
 
     // Merge P4 users + author_map rows
     const mergedMap = new Map();
@@ -1454,6 +1516,8 @@
         p4User: u.p4User,
         p4Name: u.fullName,
         p4Email: u.email,
+        hasPassword: Boolean(u.hasPassword),
+        lastAccess: u.lastAccess || '',
         inP4: true,
         mapName: '',
         mapEmail: '',
@@ -1470,6 +1534,8 @@
         p4User: m.p4User,
         p4Name: '',
         p4Email: '',
+        hasPassword: false,
+        lastAccess: '',
         inP4: false,
       };
       cur.mapName = m.name || '';
@@ -1502,6 +1568,13 @@
             : r.inP4
               ? '<span class="badge badge-blue">P4 등록됨</span>'
               : '<span class="badge badge-amber">매핑 전용</span>';
+        const noPassBadge =
+          r.inP4 && !r.hasPassword
+            ? ' <span class="badge badge-rose" title="비밀번호가 미설정되어 P4V 로그인이 거부됩니다. [수정]을 눌러 8자 이상 비밀번호를 설정하세요.">⚠ 비번 미설정</span>'
+            : '';
+        const accessHint = r.inP4
+          ? `<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">최근 접속: ${r.lastAccess ? escapeHtml(formatDateTime(r.lastAccess)) : '기록 없음'}</div>`
+          : '';
 
         return `
         <tr>
@@ -1517,7 +1590,7 @@
           <td>${escapeHtml(r.mapName || r.p4Name || '-')}</td>
           <td><span class="mono-code">${escapeHtml(r.p4Email || '미등록')}</span></td>
           <td><span class="mono-code">${escapeHtml(r.mapEmail || (r.inP4 ? 'P4 이메일 자동 사용' : '-'))}</span></td>
-          <td>${statusBadge}</td>
+          <td><div>${statusBadge}${noPassBadge}</div>${accessHint}</td>
           <td style="text-align:right; white-space:nowrap;">
             <button class="btn btn-sm team-edit-btn" data-id="${escapeHtml(r.p4User)}">수정</button>
             <button class="btn btn-sm team-invite-btn" data-id="${escapeHtml(r.p4User)}" data-name="${escapeHtml(r.mapName || r.p4Name || r.p4User)}">안내복사</button>
@@ -1646,7 +1719,289 @@
   });
 
   $('btnTeamRefresh')?.addEventListener('click', refreshTeamTab);
+  $('btnTeamOpenP4Logs')?.addEventListener('click', () => switchView('p4logs'));
   $('btnTeamClearForm')?.addEventListener('click', clearTeamForm);
+
+  async function runQuickAdminLogin() {
+    const user = $('txtTeamAdminUser').value.trim() || teamP4State.adminUser || '';
+    const password = $('txtTeamQuickAdminPass').value;
+    if (!user) return toast('관리자 Perforce 아이디를 먼저 입력해 주세요.', 'error');
+    if (!password) return toast('관리자 비밀번호를 입력해 주세요.', 'error');
+    const r = await safeCall(() => api.invoke('p4prov:login', { user, password }));
+    if (r && r.ok) {
+      $('txtTeamQuickAdminPass').value = '';
+      toast(r.message, 'success');
+      await refreshTeamTab();
+      refreshProvStatus();
+    }
+  }
+  $('btnTeamQuickAdminLogin')?.addEventListener('click', () =>
+    withBusyButton('btnTeamQuickAdminLogin', '로그인 중...', runQuickAdminLogin)
+  );
+  $('txtTeamQuickAdminPass')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('btnTeamQuickAdminLogin')?.click();
+    }
+  });
+  $('btnTeamExtendTimeout')?.addEventListener('click', () =>
+    withBusyButton('btnTeamExtendTimeout', '연장 중...', async () => {
+      const adminUser = $('txtTeamAdminUser').value.trim() || teamP4State.adminUser || '';
+      if (!adminUser) return toast('관리자 Perforce 아이디를 입력해 주세요.', 'error');
+      const r = await safeCall(() => api.invoke('p4:team:extendTimeout', { adminUser, includeAllUsers: true }));
+      if (r && r.ok) {
+        toast(r.message, 'success');
+        await refreshTeamTab();
+      }
+    })
+  );
+
+  // ---------------------------------------------------------------------------
+  // Perforce Server Log Recording & Live Diagnostics View
+  // ---------------------------------------------------------------------------
+  let p4LogSource = 'p4log';
+  let p4LogFilter = 'all';
+  let p4LogLastData = null;
+  let p4LogLiveTimer = null;
+  let p4LogSearchDebounce = null;
+
+  function stopP4LogLiveTimer() {
+    if (p4LogLiveTimer) {
+      clearInterval(p4LogLiveTimer);
+      p4LogLiveTimer = null;
+    }
+  }
+
+  function syncP4LogLiveTimer() {
+    stopP4LogLiveTimer();
+    const isP4LogView = $('view-p4logs')?.classList.contains('active');
+    if ($('chkP4LogLive')?.checked && isP4LogView) {
+      p4LogLiveTimer = setInterval(() => {
+        refreshP4Logs(true);
+      }, 5000);
+    }
+  }
+
+  function renderP4Logs(data) {
+    if (!data) return;
+    p4LogLastData = data;
+    const stats = data.stats || {};
+    const c = data.config || {};
+
+    // KPIs & Sidebar Badge
+    const issueCount = (stats.authFailCount || 0) + (stats.errorCount || 0);
+    const navBadge = $('navP4LogBadge');
+    if (navBadge) {
+      navBadge.textContent = String(issueCount);
+      navBadge.className = issueCount > 0 ? 'nav-badge danger' : 'nav-badge ok';
+      navBadge.style.display = issueCount > 0 ? 'inline-flex' : 'none';
+    }
+
+    $('p4LogKpiTotal').textContent = `${stats.parsedEntries || 0}건`;
+    $('p4LogStatusBadge').textContent = data.exists ? formatBytes(data.fileSizeBytes || 0) : '파일 없음';
+    $('p4LogStatusBadge').className = data.exists ? 'badge badge-blue' : 'badge badge-amber';
+    $('p4LogKpiFile').textContent = data.filePath || 'P4LOG 경로 미감지';
+
+    $('p4LogKpiAuthFail').textContent = `${stats.authFailCount || 0}건`;
+    $('p4LogAuthBadge').textContent = (stats.authFailCount || 0) > 0 ? '확인 필요' : '정상';
+    $('p4LogAuthBadge').className = (stats.authFailCount || 0) > 0 ? 'badge badge-rose' : 'badge badge-green';
+
+    $('p4LogKpiErrors').textContent = `${stats.errorCount || 0}건`;
+    $('p4LogErrBadge').textContent = (stats.errorCount || 0) > 0 ? '감지됨' : '정상';
+    $('p4LogErrBadge').className = (stats.errorCount || 0) > 0 ? 'badge badge-amber' : 'badge badge-green';
+
+    $('p4LogKpiIps').textContent = `${stats.uniqueIps || 0}대`;
+    $('p4LogKpiUptime').textContent = c.serverUptime ? `P4D 가동시간: ${c.serverUptime}` : (c.serverReachable ? 'P4D 실행 중' : 'P4D 미연결');
+
+    // Config summary & P4ROOT mismatch warning
+    const structTxt = c.structuredLogs && c.structuredLogs.length > 0 ? ` · 구조화 로그 활성(${c.structuredLogs.length}개 설정)` : '';
+    $('p4LogConfigSummary').innerHTML =
+      `실제 <code>P4ROOT</code>: <code>${escapeHtml(c.serverRoot || '-')}</code> · <code>P4LOG</code>: <code>${escapeHtml(c.files?.p4log?.path || '-')}</code> · 로그 레벨: <strong>${escapeHtml(c.serverLogLevel || '3')}</strong>${escapeHtml(structTxt)}`;
+
+    const mismatchBox = $('p4LogRootMismatchAlert');
+    const syncRootBtn = $('btnP4LogSyncRoot');
+    if (c.depotRootMismatch && !remoteMode) {
+      mismatchBox.style.display = 'block';
+      mismatchBox.innerHTML =
+        `<div class="wiz-tip-title">⚠ 설정된 백업/디포 경로(P4DepotRoot)가 실제 Perforce 서버 경로와 다릅니다!</div>` +
+        `앱 설정: <code>${escapeHtml(c.configuredDepotRoot)}</code> → 실제 P4D 서비스 경로: <code>${escapeHtml(c.serverRoot)}</code>. 우측 <strong>[실제 P4ROOT 경로 자동 동기화]</strong>를 눌러 맞춰주세요.`;
+      syncRootBtn.style.display = 'inline-flex';
+      syncRootBtn.dataset.root = c.serverRoot;
+    } else {
+      mismatchBox.style.display = 'none';
+      syncRootBtn.style.display = 'none';
+    }
+
+    if (!$('txtP4LogAdminUser').value.trim()) {
+      $('txtP4LogAdminUser').value =
+        $('txtTeamAdminUser')?.value.trim() ||
+        $('txtProvAdminUser')?.value.trim() ||
+        teamP4State.activeSystemUser ||
+        '';
+    }
+
+    // Active monitor badge
+    const monCount = (data.activeConnections || []).length;
+    $('p4LogActiveMonBadge').textContent = `현재 활성 연결 ${monCount}건`;
+    $('p4LogActiveMonBadge').className = monCount > 0 ? 'badge badge-green' : 'badge badge-slate';
+
+    // Connected Client IPs table
+    const clientsBody = $('p4LogClientsBody');
+    const clients = data.recentClients || [];
+    if (clients.length === 0) {
+      clientsBody.innerHTML = '<tr><td colspan="7" class="empty-state">최근 서버 로그에서 감지된 클라이언트 IP가 없습니다.</td></tr>';
+    } else {
+      clientsBody.innerHTML = clients
+        .map(
+          (cl) => `
+        <tr class="p4log-client-row" data-ip="${escapeHtml(cl.ip)}" title="클릭하여 ${escapeHtml(cl.ip)} 로그만 필터링">
+          <td><span class="mono-code">${escapeHtml(cl.ip)}</span>${cl.ip === '127.0.0.1' ? ' <span class="badge badge-slate">로컬 서버</span>' : ''}</td>
+          <td><strong>${escapeHtml(cl.users.join(', ') || '미인증/unknown')}</strong></td>
+          <td style="color:var(--text-secondary);">${escapeHtml(cl.apps.slice(0, 3).join(', ') || '-')}</td>
+          <td style="color:var(--text-secondary);"><span class="mono-code">${escapeHtml(cl.lastSeen || '-')}</span></td>
+          <td><span class="mono-code">${cl.requestCount}</span></td>
+          <td>${cl.authFailCount > 0 ? `<span class="badge badge-rose">${cl.authFailCount}건</span>` : '<span class="badge badge-green">0</span>'}</td>
+          <td>${cl.errorCount > 0 ? `<span class="badge badge-amber">${cl.errorCount}건</span>` : '<span class="badge badge-slate">0</span>'}</td>
+        </tr>`
+        )
+        .join('');
+
+      clientsBody.querySelectorAll('.p4log-client-row').forEach((row) => {
+        row.addEventListener('click', () => {
+          $('txtP4LogSearch').value = row.dataset.ip || '';
+          refreshP4Logs(true);
+        });
+      });
+    }
+
+    // Log Viewer output
+    const out = $('p4LogOutput');
+    const entries = data.entries || [];
+    if (!data.exists && data.source !== 'audit') {
+      out.innerHTML = `<div class="empty-state">선택한 로그 파일(<code>${escapeHtml(data.filePath || data.source)}</code>)이 아직 생성되지 않았습니다.<br/>구조화 로그(<code>auth.csv</code> / <code>errors.csv</code>)를 보려면 상단에서 <strong>[⚙ 로그 설정 적용]</strong>을 눌러 활성화하세요.</div>`;
+      return;
+    }
+    if (entries.length === 0) {
+      out.innerHTML = '<div class="empty-state">현재 필터/검색 조건에 일치하는 로그 항목이 없습니다.</div>';
+      return;
+    }
+
+    const tagMap = {
+      auth_fail: 'AUTH FAIL',
+      error: 'ERROR',
+      warn: 'WARN',
+      admin: 'ADMIN',
+      auth: 'AUTH',
+      connect: 'CONN',
+      command: 'INFO',
+    };
+
+    const frag = document.createDocumentFragment();
+    for (const e of entries) {
+      const div = document.createElement('div');
+      const cls = e.level === 'auth_fail' ? 'auth_fail' : e.level === 'error' ? 'error' : e.level === 'warn' ? 'warn' : e.category === 'admin' ? 'admin' : 'info';
+      const tag = e.level === 'auth_fail' ? tagMap.auth_fail : e.level === 'error' ? tagMap.error : e.level === 'warn' ? tagMap.warn : tagMap[e.category] || 'INFO';
+      div.className = `p4log-entry ${cls}`;
+      const ts = e.timestamp ? e.timestamp.replace(/^\d{4}\//, '') : '--:--:--';
+      div.innerHTML = `<span class="log-ts">${escapeHtml(ts)}</span><span class="p4log-tag">${tag}</span><span class="log-txt">${escapeHtml(e.summary || e.raw)}</span>`;
+      frag.appendChild(div);
+    }
+    out.innerHTML = '';
+    out.appendChild(frag);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  async function refreshP4Logs(silent = false) {
+    const adminUser = $('txtP4LogAdminUser')?.value.trim() || $('txtTeamAdminUser')?.value.trim() || '';
+    const tailLines = Number($('selP4LogLimit')?.value) || 500;
+    const query = ($('txtP4LogSearch')?.value || '').trim();
+    const res = await safeCall(() =>
+      api.invoke('p4:logs:read', {
+        source: p4LogSource,
+        tailLines,
+        filter: p4LogFilter,
+        query,
+        adminUser,
+      })
+    );
+    if (res) {
+      renderP4Logs(res);
+      if (!silent) toast('Perforce 서버 로그를 갱신했습니다.', 'info');
+    }
+    syncP4LogLiveTimer();
+  }
+
+  $('btnP4LogRefresh')?.addEventListener('click', () => refreshP4Logs(false));
+  $('chkP4LogLive')?.addEventListener('change', syncP4LogLiveTimer);
+  $('selP4LogLimit')?.addEventListener('change', () => refreshP4Logs(true));
+  $('txtP4LogSearch')?.addEventListener('input', () => {
+    if (p4LogSearchDebounce) clearTimeout(p4LogSearchDebounce);
+    p4LogSearchDebounce = setTimeout(() => refreshP4Logs(true), 220);
+  });
+  $('btnP4LogClearSearch')?.addEventListener('click', () => {
+    $('txtP4LogSearch').value = '';
+    refreshP4Logs(true);
+  });
+  $('btnP4LogCopy')?.addEventListener('click', async () => {
+    const lines = (p4LogLastData?.entries || []).map((e) => e.raw || `[${e.timestamp}] ${e.summary}`).join('\n');
+    if (!lines) return toast('복사할 로그가 없습니다.', 'info');
+    await navigator.clipboard.writeText(lines);
+    toast('Perforce 서버 로그가 클립보드에 복사되었습니다.', 'success');
+  });
+  $('btnP4LogSnapshot')?.addEventListener('click', () =>
+    withBusyButton('btnP4LogSnapshot', '저장 중...', async () => {
+      const adminUser = $('txtP4LogAdminUser')?.value.trim() || $('txtTeamAdminUser')?.value.trim() || '';
+      const r = await safeCall(() => api.invoke('p4:logs:snapshot', { adminUser }));
+      if (r && r.ok) {
+        toast(`진단 스냅샷 저장 완료: ${r.filePath}`, 'success');
+        refreshP4Logs(true);
+      }
+    })
+  );
+  $('btnP4LogOpenDir')?.addEventListener('click', () => {
+    const dir = p4LogLastData?.config?.auditDir || `${cfg.ArchiveRoot || 'C:\\BuildArchive'}\\P4ServerLogs`;
+    api.invoke('system:openFolder', dir);
+  });
+  $('btnP4LogSyncRoot')?.addEventListener('click', async () => {
+    const serverRoot = $('btnP4LogSyncRoot').dataset.root || '';
+    if (!serverRoot) return;
+    const saved = await safeCall(() => api.invoke('p4:logs:syncDepotRoot', { serverRoot }), `P4DepotRoot를 '${serverRoot}'로 동기화했습니다!`);
+    if (saved) {
+      cfg = saved;
+      hydrateConfigToUI();
+      refreshP4Logs(true);
+    }
+  });
+  $('btnP4LogApplyConfig')?.addEventListener('click', () =>
+    withBusyButton('btnP4LogApplyConfig', '적용 중...', async () => {
+      const adminUser = $('txtP4LogAdminUser').value.trim() || $('txtTeamAdminUser')?.value.trim() || '';
+      const logLevel = Number($('selP4LogLevel').value) || 3;
+      const enableStructuredLogs = Boolean($('chkP4StructuredLogs').checked);
+      const r = await safeCall(() =>
+        api.invoke('p4:logs:configure', { adminUser, logLevel, enableStructuredLogs, maxMb: 20, retainCount: 5 })
+      );
+      if (r && r.ok) {
+        toast(r.message, 'success');
+        refreshP4Logs(true);
+      }
+    })
+  );
+  document.querySelectorAll('#p4LogSourceTabs button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#p4LogSourceTabs button').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      p4LogSource = btn.dataset.source || 'p4log';
+      refreshP4Logs(true);
+    });
+  });
+  document.querySelectorAll('#p4LogFilterChips .chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#p4LogFilterChips .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      p4LogFilter = chip.dataset.filter || 'all';
+      refreshP4Logs(true);
+    });
+  });
   $('btnTeamLookupGh')?.addEventListener('click', lookupTeamGitHubProfile);
   $('txtTeamGhUrl')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -2369,6 +2724,9 @@
         renderAuthorMap();
       }
       refreshTeamTab();
+      if ((cfg.VcsMode || 'PerforceHybrid') === 'PerforceHybrid') {
+        refreshP4Logs(true);
+      }
       // ★ PC 최초 실행 시 설정 마법사 자동 작동!
       if (!silent && !cfg.SetupCompleted) {
         openWizard(1);

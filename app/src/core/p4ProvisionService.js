@@ -149,9 +149,16 @@ function runElevatedPowerShell(scriptBody) {
 }
 
 class P4ProvisionService {
-  constructor(configStore, stateHub) {
+  constructor(configStore, stateHub, p4LogService = null) {
     this.configStore = configStore;
     this.stateHub = stateHub;
+    this.p4LogService = p4LogService;
+  }
+
+  _audit(category, level, message, meta = null) {
+    if (this.p4LogService && typeof this.p4LogService.appendAuditLog === 'function') {
+      this.p4LogService.appendAuditLog(category, level, message, meta);
+    }
   }
 
   async inspectStatus(adminUserOverride = '') {
@@ -173,10 +180,13 @@ class P4ProvisionService {
       activeUser: '',
       adminUser: '',
       adminLoggedIn: false,
+      adminTicketMessage: '',
       streamExists: false,
       typemapApplied: false,
       botUserExists: false,
       botTicketValid: false,
+      botTicketMessage: '',
+      statusQueriedAs: '',
       buildClientExists: false,
       mirrorClientExists: false,
       p4ignoreExists: false,
@@ -186,13 +196,20 @@ class P4ProvisionService {
     const cli = await execCapture('p4', ['-V'], { timeoutMs: 4000 });
     status.p4CliInstalled = cli.code === 0;
 
-    // 2. Service check
+    // 2. Service & Registry P4ROOT check
     for (const svc of ['Perforce', 'HelixCore', 'p4d']) {
       const q = await execCapture('sc', ['query', svc], { timeoutMs: 4000 });
       if (q.code === 0 && /STATE/i.test(q.stdout || '')) {
         status.serviceInstalled = true;
         status.serviceName = svc;
         status.serviceRunning = /RUNNING/i.test(q.stdout);
+        const rq = await execCapture('reg', ['query', `HKLM\\SYSTEM\\CurrentControlSet\\Services\\${svc}\\Parameters`, '/v', 'P4ROOT'], {
+          timeoutMs: 3000,
+        });
+        if (rq.code === 0 && rq.stdout) {
+          const rm = rq.stdout.match(/P4ROOT\s+REG_(?:SZ|EXPAND_SZ)\s+(.+)$/im);
+          if (rm && rm[1].trim()) status.serverRoot = rm[1].trim();
+        }
         break;
       }
     }
@@ -218,31 +235,55 @@ class P4ProvisionService {
     }
 
     const adminUser = (adminUserOverride || status.activeUser || (cfg.P4User !== 'p4bot' ? cfg.P4User : '') || 'admin').trim();
+    const botName = (cfg.P4User || 'p4bot').trim();
     status.adminUser = adminUser;
 
     if (status.serverReachable) {
       const baseAdmin = ['-p', port, '-u', adminUser];
       const adminLogin = await execCapture('p4', [...baseAdmin, 'login', '-s'], { timeoutMs: 4000 });
       status.adminLoggedIn = adminLogin.code === 0;
+      status.adminTicketMessage = (adminLogin.stdout || adminLogin.stderr || '').trim();
 
-      if (status.adminLoggedIn) {
+      // Always check automation bot ticket independently (do NOT gate on adminLoggedIn!)
+      const baseBot = ['-p', port, '-u', botName];
+      const botLogin =
+        botName.toLowerCase() === adminUser.toLowerCase()
+          ? adminLogin
+          : await execCapture('p4', [...baseBot, 'login', '-s'], { timeoutMs: 4000 });
+      status.botTicketValid = botLogin.code === 0;
+      status.botTicketMessage = (botLogin.stdout || botLogin.stderr || '').trim();
+
+      // Use whichever valid ticket is available (admin first, fallback to read-only bot p4bot!)
+      const readBase = status.adminLoggedIn ? baseAdmin : status.botTicketValid ? baseBot : null;
+      status.statusQueriedAs = status.adminLoggedIn ? adminUser : status.botTicketValid ? botName : '';
+
+      if (readBase) {
+        // Fetch authenticated info so serverRoot isn't hidden by unauthenticated p4 info
+        const authInfo = await execCapture('p4', [...readBase, '-ztag', 'info'], { timeoutMs: 4000 });
+        if (authInfo.code === 0) {
+          for (const line of (authInfo.stdout || '').split(/\r?\n/)) {
+            const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s+(.*)$/);
+            if (!m) continue;
+            const [, k, v] = m;
+            if (k === 'serverRoot' && v.trim()) status.serverRoot = v.trim();
+            if (k === 'unicode' && v.trim().toLowerCase() === 'enabled') status.unicodeEnabled = true;
+          }
+        }
+
         // Stream check
-        const stRes = await execCapture('p4', [...baseAdmin, '-ztag', 'streams', stream], { timeoutMs: 5000 });
+        const stRes = await execCapture('p4', [...readBase, '-ztag', 'streams', stream], { timeoutMs: 5000 });
         status.streamExists = stRes.code === 0 && /\.\.\.\s+Stream\s+/i.test(stRes.stdout || '');
 
         // Typemap check
-        const tmRes = await execCapture('p4', [...baseAdmin, 'typemap', '-o'], { timeoutMs: 5000 });
+        const tmRes = await execCapture('p4', [...readBase, 'typemap', '-o'], { timeoutMs: 5000 });
         status.typemapApplied = tmRes.code === 0 && /binary\+l\s+\/\/\.\.\.\.uasset/i.test(tmRes.stdout || '');
 
-        // Bot user & ticket check
-        const botName = cfg.P4User || 'p4bot';
-        const usersRes = await execCapture('p4', [...baseAdmin, '-ztag', 'users', botName], { timeoutMs: 4000 });
+        // Bot user check
+        const usersRes = await execCapture('p4', [...readBase, '-ztag', 'users', botName], { timeoutMs: 4000 });
         status.botUserExists = usersRes.code === 0 && /\.\.\.\s+User\s+/i.test(usersRes.stdout || '');
-        const botLogin = await execCapture('p4', ['-p', port, '-u', botName, 'login', '-s'], { timeoutMs: 4000 });
-        status.botTicketValid = botLogin.code === 0;
 
         // Workspaces check
-        const clientsRes = await execCapture('p4', [...baseAdmin, '-ztag', 'clients'], { timeoutMs: 5000 });
+        const clientsRes = await execCapture('p4', [...readBase, '-ztag', 'clients'], { timeoutMs: 5000 });
         if (clientsRes.code === 0) {
           const names = new Set(
             (clientsRes.stdout || '')
@@ -413,8 +454,11 @@ foreach ($r in $rules) {
 
     const res = await execWithStdin('p4', ['-p', port, '-u', targetUser, 'login'], `${password}\n`, { timeoutMs: 8000 });
     if (res.code !== 0) {
-      throw new Error(`로그인 실패: ${(res.stderr || res.stdout).trim()}`);
+      const errMsg = (res.stderr || res.stdout).trim();
+      this._audit('LOGIN', 'auth_fail', `'${targetUser}' 로그인 실패 (${port}): ${errMsg}`);
+      throw new Error(`로그인 실패: ${errMsg}`);
     }
+    this._audit('LOGIN', 'info', `'${targetUser}' 로그인 티켓 발급 완료 (${port})`);
     this.stateHub.appendLog(`✔ [P4 Login] '${targetUser}' 티켓 발급 완료!`, 'success');
     return { ok: true, message: `'${targetUser}' 로그인 티켓 발급 완료!` };
   }

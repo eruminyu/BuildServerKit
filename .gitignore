@@ -28,6 +28,7 @@ _work/
 # Release packaging & temporary artifacts
 dist/
 release/
+BuildServerKit_Studio_Portable.exe
 *.zip
 *.pdb
 *.user

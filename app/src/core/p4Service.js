@@ -3,13 +3,20 @@ const path = require('path');
 const { execCapture, execWithStdin, spawnStreamed } = require('./processRunner');
 
 class P4Service {
-  constructor(configStore, stateHub) {
+  constructor(configStore, stateHub, p4LogService = null) {
     this.configStore = configStore;
     this.stateHub = stateHub;
+    this.p4LogService = p4LogService;
     this.mirrorTimer = null;
     this.isMirrorRunning = false;
     this.isBackupRunning = false;
     this.schedulerRegistered = false;
+  }
+
+  _audit(category, level, message, meta = null) {
+    if (this.p4LogService && typeof this.p4LogService.appendAuditLog === 'function') {
+      this.p4LogService.appendAuditLog(category, level, message, meta);
+    }
   }
 
   async refreshSchedulerStatus() {
@@ -34,14 +41,20 @@ class P4Service {
 
     let serverVersion = '';
     let serverAddress = '';
+    let serverRoot = '';
+    let serverUptime = '';
     let unicodeMode = false;
+    let securityEnabled = false;
     for (const line of (info.stdout || '').split(/\r?\n/)) {
       const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s+(.*)$/);
       if (!m) continue;
       const [, key, val] = m;
       if (key === 'serverVersion') serverVersion = val.trim();
       else if (key === 'serverAddress') serverAddress = val.trim();
+      else if (key === 'serverRoot') serverRoot = val.trim();
+      else if (key === 'serverUptime') serverUptime = val.trim();
       else if (key === 'unicode' && val.trim().toLowerCase() === 'enabled') unicodeMode = true;
+      else if (key === 'security' && val.trim().toLowerCase() === 'enabled') securityEnabled = true;
     }
 
     let buildRoot = '';
@@ -59,17 +72,28 @@ class P4Service {
       }
     }
 
-    return {
+    const result = {
       ok: info.code === 0,
       ticketOk: login.code === 0,
       ticketMessage: (login.stdout || login.stderr || '').trim(),
       serverAddress,
       serverVersion,
+      serverRoot,
+      serverUptime,
       unicodeMode,
+      securityEnabled,
       buildRoot,
       mirrorRoot,
       rawError: info.code !== 0 ? (info.stderr || info.stdout || 'p4 실행 실패').trim() : '',
     };
+    this._audit(
+      'CONNECT_TEST',
+      result.ok ? (result.ticketOk ? 'info' : 'warn') : 'error',
+      result.ok
+        ? `연결 성공 (${result.serverAddress || cfg.P4Port}, user=${cfg.P4User}, ticket=${result.ticketOk ? 'OK' : result.ticketMessage})`
+        : `연결 실패 (${cfg.P4Port}): ${result.rawError}`
+    );
+    return result;
   }
 
   async getRecentCLs(limit = 12) {
@@ -274,6 +298,7 @@ class P4Service {
       lastStatus: code === 0 ? 'ok' : 'error',
       lastMessage: lastLine,
     });
+    this._audit('MIRROR', code === 0 ? 'info' : 'error', `미러링 종료 (ExitCode=${code}, CL=#${status.lastCL}): ${lastLine}`);
 
     return { ok: code === 0, code, logs, status: this.getMirrorStatus() };
   }
@@ -397,13 +422,60 @@ class P4Service {
   // ---------------------------------------------------------------------------
   // Team & Account Management (Free-tier 5-user / 20-workspace safe helpers)
   // ---------------------------------------------------------------------------
+  async _checkTicket(port, user) {
+    const u = String(user || '').trim();
+    if (!u) return { valid: false, message: '' };
+    const r = await execCapture('p4', ['-p', port, '-u', u, 'login', '-s'], { timeoutMs: 4000 });
+    return {
+      valid: r.code === 0,
+      message: (r.stdout || r.stderr || '').trim(),
+    };
+  }
+
+  async _ensureAdminTicket(port, adminUser) {
+    const admin = String(adminUser || '').trim();
+    if (!admin) return;
+    const chk = await this._checkTicket(port, admin);
+    if (!chk.valid) {
+      this._audit('AUTH', 'auth_fail', `관리자(${admin}) 세션 만료 또는 미로그인: ${chk.message}`);
+      throw new Error(
+        `관리자 계정('${admin}')의 Perforce 로그인 세션이 만료되었거나 로그인되어 있지 않습니다. ` +
+          `상단 [관리자 빠른 재로그인]에서 비밀번호로 다시 로그인한 뒤 시도해 주세요. (상세: ${chk.message || '세션 만료'})`
+      );
+    }
+  }
+
+  _parseZtagUsers(stdout) {
+    const users = [];
+    const blocks = (stdout || '').split(/\r?\n\s*\r?\n/);
+    for (const block of blocks) {
+      const fields = {};
+      for (const line of block.split(/\r?\n/)) {
+        const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s*(.*)$/);
+        if (m) fields[m[1]] = m[2].trim();
+      }
+      if (!fields.User) continue;
+      const accessEp = Number(fields.Access) || 0;
+      const updateEp = Number(fields.Update) || 0;
+      users.push({
+        p4User: fields.User,
+        email: fields.Email || '',
+        fullName: fields.FullName || '',
+        type: fields.Type || 'standard',
+        hasPassword: Boolean(fields.Password && (fields.Password.toLowerCase() === 'enabled' || fields.Password.length > 0)),
+        lastAccessEpoch: accessEp,
+        lastAccess: accessEp > 0 ? new Date(accessEp * 1000).toISOString() : '',
+        lastUpdateEpoch: updateEp,
+      });
+    }
+    return users;
+  }
+
   async listUsersAndQuotas(adminUserOverride = '') {
     const cfg = this.configStore.get();
     const port = cfg.P4Port || 'localhost:1666';
-    const userArg = (adminUserOverride || cfg.P4User || '').trim();
-    const base = userArg ? ['-p', port, '-u', userArg] : ['-p', port];
 
-    // Also inspect current default OS user from -ztag info
+    // 1. Check server reachability & OS default P4USER from -ztag info
     let activeSystemUser = '';
     const infoRes = await execCapture('p4', ['-p', port, '-ztag', 'info'], { timeoutMs: 5000 });
     const connected = infoRes.code === 0;
@@ -412,38 +484,76 @@ class P4Service {
       if (m) activeSystemUser = m[1].trim();
     }
 
+    const botUser = (cfg.P4User || 'p4bot').trim();
+    const adminUser = (
+      adminUserOverride ||
+      activeSystemUser ||
+      (botUser && botUser.toLowerCase() !== 'p4bot' ? botUser : '') ||
+      ''
+    ).trim();
+
     const users = [];
     let workspaceCount = 0;
     let noAutoCreate = '';
+    let noAutoCreateStatus = connected ? 'unknown_need_admin' : 'offline';
     let error = '';
+    let authWarning = '';
+    let queriedAs = '';
+    let adminTicketValid = false;
+    let adminTicketMessage = '';
+    let botTicketValid = false;
+    let botTicketMessage = '';
 
     if (connected) {
-      // Try with configured user, fallback to activeSystemUser if ticket missing
-      let uRes = await execCapture('p4', [...base, '-ztag', 'users'], { timeoutMs: 6000 });
-      let effectiveBase = base;
-      if (uRes.code !== 0 && activeSystemUser && activeSystemUser !== userArg) {
-        effectiveBase = ['-p', port, '-u', activeSystemUser];
-        uRes = await execCapture('p4', [...effectiveBase, '-ztag', 'users'], { timeoutMs: 6000 });
+      // 2. Check both admin ticket and automation bot ticket independently
+      if (adminUser) {
+        const at = await this._checkTicket(port, adminUser);
+        adminTicketValid = at.valid;
+        adminTicketMessage = at.message;
+      }
+      if (botUser) {
+        if (botUser.toLowerCase() === adminUser.toLowerCase()) {
+          botTicketValid = adminTicketValid;
+          botTicketMessage = adminTicketMessage;
+        } else {
+          const bt = await this._checkTicket(port, botUser);
+          botTicketValid = bt.valid;
+          botTicketMessage = bt.message;
+        }
       }
 
-      if (uRes.code === 0) {
-        let cur = null;
-        for (const line of (uRes.stdout || '').split(/\r?\n/)) {
-          const m = line.match(/^\.\.\.\s+([A-Za-z0-9_]+)\s*(.*)$/);
-          if (!m) continue;
-          const [, k, v] = m;
-          if (k === 'User') {
-            if (cur) users.push(cur);
-            cur = { p4User: v.trim(), email: '', fullName: '', type: 'standard' };
-          } else if (cur) {
-            if (k === 'Email') cur.email = v.trim();
-            else if (k === 'FullName') cur.fullName = v.trim();
-            else if (k === 'Type') cur.type = v.trim();
-          }
+      // 3. Build read candidate order: valid admin -> valid bot (p4bot unlimited ticket!) -> fallbacks
+      const candidates = [];
+      const addCand = (u) => {
+        const v = String(u || '').trim();
+        if (v && !candidates.some((c) => c.toLowerCase() === v.toLowerCase())) candidates.push(v);
+      };
+      if (adminTicketValid) addCand(adminUser);
+      if (botTicketValid) addCand(botUser);
+      addCand(botUser);
+      addCand(adminUser);
+      addCand(activeSystemUser);
+
+      let uRes = null;
+      let effectiveBase = ['-p', port];
+      let lastErr = '';
+      for (const cand of candidates) {
+        const baseCand = ['-p', port, '-u', cand];
+        const tryRes = await execCapture('p4', [...baseCand, '-ztag', 'users'], { timeoutMs: 6000 });
+        if (tryRes.code === 0) {
+          uRes = tryRes;
+          effectiveBase = baseCand;
+          queriedAs = cand;
+          break;
         }
-        if (cur) users.push(cur);
+        lastErr = (tryRes.stderr || tryRes.stdout || '').trim();
+      }
+
+      if (uRes && uRes.code === 0) {
+        users.push(...this._parseZtagUsers(uRes.stdout));
       } else {
-        error = (uRes.stderr || uRes.stdout || '').trim();
+        error = lastErr || 'Perforce 유저 목록을 조회할 수 없습니다 (로그인 티켓 만료 또는 권한 부족).';
+        this._audit('USERS_LIST', 'auth_fail', `유저 목록 조회 실패: ${error}`);
       }
 
       const cRes = await execCapture('p4', [...effectiveBase, '-ztag', 'clients'], { timeoutMs: 6000 });
@@ -451,23 +561,42 @@ class P4Service {
         workspaceCount = (cRes.stdout.match(/^\.\.\.\s+client\s+/gm) || []).length;
       }
 
-      const cfgRes = await execCapture('p4', [...effectiveBase, 'configure', 'show', 'dm.user.noautocreate'], { timeoutMs: 5000 });
+      // `configure show` requires admin/super — try admin if valid, else effectiveBase
+      const cfgBase = adminTicketValid && adminUser ? ['-p', port, '-u', adminUser] : effectiveBase;
+      const cfgRes = await execCapture('p4', [...cfgBase, 'configure', 'show', 'dm.user.noautocreate'], { timeoutMs: 5000 });
       if (cfgRes.code === 0) {
         const cm = (cfgRes.stdout || '').match(/dm\.user\.noautocreate\s*=\s*(\d+)/);
         if (cm) noAutoCreate = cm[1];
+        noAutoCreateStatus = noAutoCreate === '2' || noAutoCreate === '1' ? 'locked' : 'open';
+      } else if (/don't have permission|session has expired|password/i.test(cfgRes.stderr || cfgRes.stdout || '')) {
+        noAutoCreateStatus = 'unknown_need_admin';
+      }
+
+      if (users.length > 0 && adminUser && !adminTicketValid) {
+        authWarning = `관리자 계정('${adminUser}')의 로그인 세션이 만료되었습니다 (기본 12시간). 현재 목록은 '${queriedAs}' 티켓으로 정상 표시 중이며, 팀원 추가·수정·비밀번호 변경을 하려면 관리자 재로그인이 필요합니다.`;
       }
     } else {
       error = (infoRes.stderr || infoRes.stdout || 'Perforce 서버에 연결할 수 없습니다.').trim();
+      this._audit('USERS_LIST', 'error', `서버 미연결 (${port}): ${error}`);
     }
 
     return {
       connected,
       activeSystemUser,
+      adminUser,
+      adminTicketValid,
+      adminTicketMessage,
+      botUser,
+      botTicketValid,
+      botTicketMessage,
+      queriedAs,
       users,
       userCount: users.length,
       workspaceCount,
       noAutoCreateLocked: noAutoCreate === '2' || noAutoCreate === '1',
+      noAutoCreateStatus, // locked | open | unknown_need_admin | offline
       error,
+      authWarning,
     };
   }
 
@@ -487,10 +616,31 @@ class P4Service {
     const admin = (adminUser || '').trim();
     const base = admin ? ['-p', port, '-u', admin] : ['-p', port];
 
+    // 0. Ensure admin session is valid before mutating server state
+    if (admin) {
+      await this._ensureAdminTicket(port, admin);
+    }
+
+    // Check if user already exists & whether a password is already configured
+    let existingUser = null;
+    const existRes = await execCapture('p4', [...base, '-ztag', 'users', targetId], { timeoutMs: 5000 });
+    if (existRes.code === 0) {
+      const parsed = this._parseZtagUsers(existRes.stdout);
+      existingUser = parsed.find((u) => u.p4User.toLowerCase() === targetId.toLowerCase()) || null;
+    }
+
+    if ((!password || password.length === 0) && (!existingUser || !existingUser.hasPassword)) {
+      throw new Error(
+        `신규 계정 또는 비밀번호가 미설정된 계정('${targetId}')은 비밀번호(영문+숫자 등 2종 이상 조합 8자 이상)를 반드시 입력해야 P4V 첫 로그인이 성공합니다!`
+      );
+    }
+
     // 1. Fetch current spec (or default template for new user)
     const outRes = await execCapture('p4', [...base, 'user', '-o', targetId], { timeoutMs: 6000 });
     if (outRes.code !== 0) {
-      throw new Error(`p4 user -o 실패: ${(outRes.stderr || outRes.stdout).trim()}`);
+      const errMsg = (outRes.stderr || outRes.stdout).trim();
+      this._audit('USER_UPSERT', 'error', `p4 user -o ${targetId} 실패 (admin=${admin}): ${errMsg}`);
+      throw new Error(`p4 user -o 실패: ${errMsg}`);
     }
 
     const lines = (outRes.stdout || '').split(/\r?\n/);
@@ -513,7 +663,9 @@ class P4Service {
     // 2. Apply updated user spec with -f (admin force)
     const saveRes = await execWithStdin('p4', [...base, 'user', '-f', '-i'], updatedLines.join('\n') + '\n', { timeoutMs: 8000 });
     if (saveRes.code !== 0) {
-      throw new Error(`p4 user -f -i 실패: ${(saveRes.stderr || saveRes.stdout).trim()}`);
+      const errMsg = (saveRes.stderr || saveRes.stdout).trim();
+      this._audit('USER_UPSERT', 'error', `p4 user -f -i ${targetId} 실패: ${errMsg}`);
+      throw new Error(`p4 user -f -i 실패: ${errMsg}`);
     }
 
     // 3. Optionally set password (if 8+ chars provided)
@@ -525,6 +677,7 @@ class P4Service {
       const pwRes = await execWithStdin('p4', [...base, 'passwd', targetId], `${password}\n${password}\n`, { timeoutMs: 8000 });
       if (pwRes.code !== 0) {
         const rawErr = (pwRes.stderr || pwRes.stdout || '').trim();
+        this._audit('USER_PASSWD', 'error', `p4 passwd ${targetId} 거부: ${rawErr}`);
         throw new Error(
           `계정은 저장되었으나 비밀번호 설정이 거부되었습니다 (P4D 보안 정책: 영문 대/소문자 + 숫자·특수문자 중 2종 이상 조합 8자 이상 필요). 상세: ${rawErr}`
         );
@@ -532,6 +685,7 @@ class P4Service {
       passwordMsg = ' · 비밀번호 설정 완료';
     }
 
+    this._audit('USER_UPSERT', 'info', `P4 계정 저장 완료: ${targetId} (${targetName} <${targetEmail}>)${passwordMsg}`);
     this.stateHub.appendLog(`✔ [P4 계정 저장] ${targetId} (${targetName} <${targetEmail}>)${passwordMsg}`, 'success');
     return { ok: true, message: `Perforce 계정 '${targetId}' 저장 완료!${passwordMsg}` };
   }
@@ -544,10 +698,17 @@ class P4Service {
     const admin = (adminUser || '').trim();
     const base = admin ? ['-p', port, '-u', admin] : ['-p', port];
 
+    if (admin) {
+      await this._ensureAdminTicket(port, admin);
+    }
+
     const res = await execCapture('p4', [...base, 'user', '-f', '-d', targetId], { timeoutMs: 8000 });
     if (res.code !== 0) {
-      throw new Error(`p4 user -d 실패: ${(res.stderr || res.stdout).trim()}`);
+      const errMsg = (res.stderr || res.stdout).trim();
+      this._audit('USER_DELETE', 'error', `p4 user -d ${targetId} 실패: ${errMsg}`);
+      throw new Error(`p4 user -d 실패: ${errMsg}`);
     }
+    this._audit('USER_DELETE', 'warn', `P4 계정 삭제됨: ${targetId} (by ${admin || 'default'})`);
     this.stateHub.appendLog(`✔ [P4 계정 삭제] ${targetId}`, 'warn');
     return { ok: true, message: `Perforce 계정 '${targetId}'이(가) 삭제되었습니다.` };
   }
@@ -558,11 +719,113 @@ class P4Service {
     const admin = (adminUser || '').trim();
     const base = admin ? ['-p', port, '-u', admin] : ['-p', port];
 
+    if (admin) {
+      await this._ensureAdminTicket(port, admin);
+    }
+
     const res = await execCapture('p4', [...base, 'configure', 'set', 'dm.user.noautocreate=2'], { timeoutMs: 6000 });
     if (res.code !== 0) {
-      throw new Error(`설정 실패: ${(res.stderr || res.stdout).trim()}`);
+      const errMsg = (res.stderr || res.stdout).trim();
+      this._audit('CONFIG', 'error', `dm.user.noautocreate=2 설정 실패: ${errMsg}`);
+      throw new Error(`설정 실패: ${errMsg}`);
     }
+    this._audit('CONFIG', 'info', 'dm.user.noautocreate=2 적용 완료');
     return { ok: true, message: '임의 유저 자동 생성이 차단되었습니다 (dm.user.noautocreate=2).' };
+  }
+
+  /**
+   * Creates/updates a timeout-only group (NOT referenced in `p4 protect`, so permissions are untouched)
+   * to prevent 12-hour default ticket expiration for the admin and team members.
+   */
+  async extendSessionTimeout({ adminUser = '', groupName = 'team_long_session', timeout = 'unlimited', includeAllUsers = true } = {}) {
+    const cfg = this.configStore.get();
+    const port = cfg.P4Port || 'localhost:1666';
+    const admin = String(adminUser || '').trim();
+    if (!admin) throw new Error('관리자(super) Perforce 아이디를 먼저 입력해 주세요.');
+
+    await this._ensureAdminTicket(port, admin);
+    const base = ['-p', port, '-u', admin];
+
+    const targetUsers = new Set([admin]);
+    if (includeAllUsers) {
+      const uRes = await execCapture('p4', [...base, '-ztag', 'users'], { timeoutMs: 6000 });
+      if (uRes.code === 0) {
+        for (const u of this._parseZtagUsers(uRes.stdout)) {
+          if (u.p4User && u.p4User.toLowerCase() !== 'p4bot') {
+            targetUsers.add(u.p4User);
+          }
+        }
+      }
+    }
+
+    const gOut = await execCapture('p4', [...base, 'group', '-o', groupName], { timeoutMs: 6000 });
+    if (gOut.code !== 0) {
+      throw new Error(`p4 group -o ${groupName} 실패: ${(gOut.stderr || gOut.stdout).trim()}`);
+    }
+
+    // Parse existing users in the group so we never remove anyone
+    const lines = (gOut.stdout || '').split(/\r?\n/);
+    const outLines = [];
+    let inUsers = false;
+    let sawTimeout = false;
+    let sawPwTimeout = false;
+    let sawUsers = false;
+    for (const line of lines) {
+      if (/^Timeout:/i.test(line)) {
+        sawTimeout = true;
+        outLines.push(`Timeout:\t${timeout}`);
+        continue;
+      }
+      if (/^PasswordTimeout:/i.test(line)) {
+        sawPwTimeout = true;
+        outLines.push('PasswordTimeout:\tunlimited');
+        continue;
+      }
+      if (/^Users:/i.test(line)) {
+        inUsers = true;
+        sawUsers = true;
+        outLines.push('Users:');
+        continue;
+      }
+      if (inUsers) {
+        if (/^\s+\S+/.test(line)) {
+          targetUsers.add(line.trim());
+          continue;
+        }
+        // Flush collected users before leaving Users section
+        for (const u of targetUsers) outLines.push(`\t${u}`);
+        inUsers = false;
+      }
+      outLines.push(line);
+    }
+    if (inUsers) {
+      for (const u of targetUsers) outLines.push(`\t${u}`);
+    } else if (!sawUsers) {
+      outLines.push('Users:');
+      for (const u of targetUsers) outLines.push(`\t${u}`);
+    }
+    if (!sawTimeout) outLines.push(`Timeout:\t${timeout}`);
+    if (!sawPwTimeout) outLines.push('PasswordTimeout:\tunlimited');
+
+    const gIn = await execWithStdin('p4', [...base, 'group', '-i'], outLines.join('\n') + '\n', { timeoutMs: 8000 });
+    if (gIn.code !== 0) {
+      const errMsg = (gIn.stderr || gIn.stdout).trim();
+      this._audit('SESSION_TIMEOUT', 'error', `그룹 ${groupName} 저장 실패: ${errMsg}`);
+      throw new Error(`p4 group -i 실패: ${errMsg}`);
+    }
+
+    const userList = Array.from(targetUsers);
+    this._audit('SESSION_TIMEOUT', 'info', `세션 만료 연장 그룹(${groupName}, Timeout=${timeout}) 적용: ${userList.join(', ')}`);
+    this.stateHub.appendLog(
+      `✔ [P4 세션 만료 연장] 그룹 '${groupName}' (Timeout: ${timeout})에 ${userList.join(', ')} 등록 완료! (다음 로그인부터 무기한 티켓 적용)`,
+      'success'
+    );
+    return {
+      ok: true,
+      groupName,
+      users: userList,
+      message: `세션 만료 무기한 연장 완료! (${userList.join(', ')}) — 한 번 다시 로그인하면 이후 12시간 만료가 발생하지 않습니다.`,
+    };
   }
 }
 

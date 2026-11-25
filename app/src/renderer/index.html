@@ -21,7 +21,7 @@
             </svg>
           </div>
           <span>BuildServerKit Studio</span>
-          <span class="brand-version">v2.3.0</span>
+          <span class="brand-version">v2.4.0</span>
         </div>
         <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
       </div>
@@ -86,6 +86,11 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>팀원 &amp; 계정 관리</span>
           <span id="navTeamBadge" class="nav-badge">0/5</span>
+        </button>
+        <button class="nav-item" data-view="p4logs">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>Perforce 서버 로그</span>
+          <span id="navP4LogBadge" class="nav-badge" style="display:none">0</span>
         </button>
 
         <div class="nav-section-label">Operations</div>
@@ -814,6 +819,7 @@
               <p class="page-subtitle">GitHub 프로필 링크만 붙여넣으면 이름·잔디용 이메일을 자동 조회해 Perforce 계정 생성/수정과 매핑을 한 번에 처리합니다.</p>
             </div>
             <div style="display:flex; gap:8px;">
+              <button id="btnTeamOpenP4Logs" class="btn btn-sm">📜 P4 서버 로그 보기</button>
               <button id="btnTeamRefresh" class="btn btn-sm">↻ P4 유저 &amp; 한도 새로고침</button>
             </div>
           </div>
@@ -845,6 +851,19 @@
                 <span id="teamAutoCreateDesc" style="font-size:12px; color:var(--text-secondary);">오타로 6번째 유저 생성 방지</span>
                 <button id="btnLockAutoCreate" class="btn btn-sm btn-violet local-only">🔒 차단 켜기</button>
               </div>
+            </div>
+          </div>
+
+          <!-- Admin Session Health & Quick Re-Login Banner -->
+          <div id="teamAuthBanner" class="p4-auth-banner" style="display:none;">
+            <div class="p4-auth-banner-main">
+              <div id="teamAuthBannerTitle" class="p4-auth-banner-title"></div>
+              <div id="teamAuthBannerDesc" class="p4-auth-banner-desc"></div>
+            </div>
+            <div id="teamQuickLoginRow" class="p4-auth-banner-actions local-only-wrap">
+              <input id="txtTeamQuickAdminPass" type="password" class="input mono" style="width:185px; height:32px; font-size:12px;" placeholder="관리자 비밀번호 입력" />
+              <button id="btnTeamQuickAdminLogin" class="btn btn-sm btn-success local-only">🔑 관리자 빠른 재로그인</button>
+              <button id="btnTeamExtendTimeout" class="btn btn-sm btn-violet local-only" title="관리자 및 팀원 티켓 만료를 12시간에서 무기한으로 연장 (권한 변경 없음)">♾ 12시간 만료 해제</button>
             </div>
           </div>
 
@@ -940,6 +959,181 @@
                 </tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <!-- ==================== VIEW 5B: PERFORCE SERVER LOGS ==================== -->
+        <section id="view-p4logs" class="view-panel">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">Perforce 서버 로그 &amp; 접속 진단</h1>
+              <p class="page-subtitle">P4D 실시간 서버 로그(<code>P4LOG</code>) · 인증/로그인 실패 추적 · Tailscale 접속 IP 확인 · 구조화 로그 자동 보관 설정</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <label class="p4log-live-toggle">
+                <input id="chkP4LogLive" type="checkbox" />
+                <span>실시간 감시 (5초)</span>
+              </label>
+              <button id="btnP4LogRefresh" class="btn btn-sm">↻ 새로고침</button>
+              <button id="btnP4LogSnapshot" class="btn btn-sm btn-primary local-only">💾 진단 스냅샷 저장</button>
+              <button id="btnP4LogOpenDir" class="btn btn-sm local-only">📂 로그 폴더</button>
+            </div>
+          </div>
+
+          <!-- 4 KPI Cards -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>최근 분석 로그 이벤트</span>
+                <span id="p4LogStatusBadge" class="badge badge-slate">확인 중</span>
+              </div>
+              <div id="p4LogKpiTotal" class="kpi-value">0건</div>
+              <div id="p4LogKpiFile" class="kpi-sub">P4LOG 파일 탐색 중...</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>로그인 · 인증 실패</span>
+                <span id="p4LogAuthBadge" class="badge badge-green">정상</span>
+              </div>
+              <div id="p4LogKpiAuthFail" class="kpi-value">0건</div>
+              <div class="kpi-sub">비밀번호 오류 · 세션 만료 · 미등록 계정</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>네트워크 · 서버 에러</span>
+                <span id="p4LogErrBadge" class="badge badge-green">정상</span>
+              </div>
+              <div id="p4LogKpiErrors" class="kpi-value">0건</div>
+              <div class="kpi-sub">TCP 끊김 · 소켓 오류 · 서버 경고</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-head">
+                <span>접속 감지된 클라이언트 IP</span>
+                <span class="badge badge-blue">Tailscale/로컬</span>
+              </div>
+              <div id="p4LogKpiIps" class="kpi-value">0대</div>
+              <div id="p4LogKpiUptime" class="kpi-sub">서버 가동시간 확인 중...</div>
+            </div>
+          </div>
+
+          <!-- P4D Logging Configuration & Path Diagnostics -->
+          <div class="card featured">
+            <div class="card-header">
+              <div>
+                <div class="card-title">⚙ Perforce 서버 로그 기록 설정 (<code>P4LOG</code> · <code>auth.csv</code> · <code>errors.csv</code>)</div>
+                <div id="p4LogConfigSummary" class="card-desc">Windows 서비스 레지스트리 및 <code>p4 info</code>에서 실제 <code>P4ROOT</code> / <code>P4LOG</code> 경로를 자동 탐지합니다.</div>
+              </div>
+              <button id="btnP4LogSyncRoot" class="btn btn-sm btn-violet local-only" style="display:none;">✔ 실제 P4ROOT 경로 자동 동기화</button>
+            </div>
+
+            <div id="p4LogRootMismatchAlert" class="wiz-tip-box warn" style="display:none; margin-bottom:12px;"></div>
+
+            <div class="form-grid">
+              <div class="field">
+                <label>P4D 로그 상세도 (<code>p4 configure set server=N</code>)</label>
+                <select id="selP4LogLevel" class="select">
+                  <option value="3" selected>레벨 3 (권장) — 모든 명령 · 로그인/인증 실패 · 에러 기록</option>
+                  <option value="2">레벨 2 — 명령 시작 + 에러 기록</option>
+                  <option value="1">레벨 1 — 서버 시작/중지 + 에러만 기록</option>
+                  <option value="4">레벨 4 — 상세 디버그 (파일 크기 증가 주의)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>설정 적용에 사용할 관리자 P4 ID (super 권한)</label>
+                <div class="input-group">
+                  <input id="txtP4LogAdminUser" class="input mono" placeholder="예: p4murmur" />
+                  <button id="btnP4LogApplyConfig" class="btn btn-sm btn-primary local-only">⚙ 로그 설정 적용</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:12px;">
+              <div>
+                <div class="toggle-label-title">구조화 로그 자동 로테이션 활성화 (<code>errors.csv</code> + <code>auth.csv</code>)</div>
+                <div class="toggle-label-sub">인증 실패와 서버 에러를 별도 CSV 파일로 자동 기록하고, 20MB 초과 시 최대 5개 파일까지 자동 로테이션하여 디스크를 보호합니다.</div>
+              </div>
+              <label class="switch">
+                <input id="chkP4StructuredLogs" type="checkbox" checked />
+                <span class="switch-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Connected Client IPs Table (10-second login troubleshooting!) -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">🌐 최근 Perforce 서버(1666)에 도달한 클라이언트 IP 현황</div>
+                <div class="card-desc">IP 행을 클릭하면 아래 로그 뷰어에서 해당 팀원 PC의 기록만 바로 필터링합니다.</div>
+              </div>
+              <span id="p4LogActiveMonBadge" class="badge badge-slate">활성 연결 0건</span>
+            </div>
+
+            <div class="wiz-tip-box" style="margin-bottom:12px;">
+              <div class="wiz-tip-title">💡 신규 팀원이 로그인 안 될 때 10초 원인 판별법</div>
+              <ul class="wiz-tip-list">
+                <li><strong>아래 표에 해당 팀원의 Tailscale IP가 아예 뜨지 않음:</strong> 팀원 PC에서 서버(<code>:1666</code>)까지 패킷이 도달하지 못함 → 팀원 PC의 <strong>Tailscale 연결/공유 수락 여부</strong>, 서버 주소(<code>Tailscale_IP:1666</code>), 방화벽 확인.</li>
+                <li><strong>IP는 뜨는데 '인증 실패'가 1건 이상 기록됨:</strong> 네트워크는 정상이며 계정 문제 → <strong>[팀원 &amp; 계정 관리]</strong>에서 <code>⚠ 비번 미설정</code> 여부 확인 및 비밀번호 재설정.</li>
+              </ul>
+            </div>
+
+            <div class="table-wrap" style="max-height:220px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>클라이언트 IP</th>
+                    <th>감지된 P4 유저</th>
+                    <th>클라이언트 앱</th>
+                    <th>마지막 접속</th>
+                    <th>요청 수</th>
+                    <th>인증 실패</th>
+                    <th>에러</th>
+                  </tr>
+                </thead>
+                <tbody id="p4LogClientsBody">
+                  <tr><td colspan="7" class="empty-state">접속 IP 정보를 불러오는 중...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Interactive Server Log Viewer -->
+          <div class="terminal-card" style="min-height:460px;">
+            <div class="terminal-toolbar">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div class="segmented" id="p4LogSourceTabs">
+                  <button data-source="p4log" class="active">P4D 서버 로그</button>
+                  <button data-source="auth">인증 로그 (auth.csv)</button>
+                  <button data-source="errors">에러 로그 (errors.csv)</button>
+                  <button data-source="p4diag">진단 로그 (p4diag)</button>
+                  <button data-source="audit">스튜디오 감사 로그</button>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <select id="selP4LogLimit" class="select" style="width:96px; height:30px; font-size:12px; padding:0 8px;">
+                  <option value="200">최근 200건</option>
+                  <option value="500" selected>최근 500건</option>
+                  <option value="1000">최근 1000건</option>
+                </select>
+                <button id="btnP4LogCopy" class="btn btn-sm">복사</button>
+              </div>
+            </div>
+
+            <div class="terminal-toolbar" style="border-top:none; padding-top:6px;">
+              <div class="chip-group" id="p4LogFilterChips">
+                <button class="chip active" data-filter="all">전체</button>
+                <button class="chip" data-filter="error">에러 · 인증실패만</button>
+                <button class="chip" data-filter="auth">로그인 · 인증</button>
+                <button class="chip" data-filter="admin">계정 · 서버 관리</button>
+                <button class="chip" data-filter="connect">네트워크 · 연결</button>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input id="txtP4LogSearch" class="input" style="width:240px; height:30px; font-size:12px;" placeholder="유저, IP, 명령어, 에러 검색..." />
+                <button id="btnP4LogClearSearch" class="btn btn-sm btn-ghost">초기화</button>
+              </div>
+            </div>
+
+            <div id="p4LogOutput" class="terminal-body" style="height:370px;"></div>
           </div>
         </section>
 

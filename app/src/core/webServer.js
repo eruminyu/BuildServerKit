@@ -43,12 +43,13 @@ function sendJson(res, status, obj) {
 }
 
 class RemoteWebServer {
-  constructor({ rendererDir, configStore, stateHub, buildService, p4Service }) {
+  constructor({ rendererDir, configStore, stateHub, buildService, p4Service, p4LogService = null }) {
     this.rendererDir = rendererDir;
     this.configStore = configStore;
     this.stateHub = stateHub;
     this.buildService = buildService;
     this.p4Service = p4Service;
+    this.p4LogService = p4LogService;
     this.server = null;
     this.port = 3780;
   }
@@ -166,6 +167,21 @@ class RemoteWebServer {
     }
     if (pathname === '/api/p4/recent-cls' && req.method === 'GET') {
       return sendJson(res, 200, await this.p4Service.getRecentCLs(10));
+    }
+    if (pathname === '/api/p4/server-log' && req.method === 'GET') {
+      if (!this.p4LogService) {
+        return sendJson(res, 404, { error: 'P4 서버 로그 서비스가 비활성화되어 있습니다.' });
+      }
+      try {
+        const source = parsed.searchParams.get('source') || 'p4log';
+        const filter = parsed.searchParams.get('filter') || 'all';
+        const query = parsed.searchParams.get('query') || '';
+        const tailLines = Number(parsed.searchParams.get('tailLines')) || 300;
+        const data = await this.p4LogService.readServerLog({ source, filter, query, tailLines });
+        return sendJson(res, 200, data);
+      } catch (e) {
+        return sendJson(res, 400, { error: e.message });
+      }
     }
     if (pathname === '/api/network' && req.method === 'GET') {
       return sendJson(res, 200, detectNetworkIPs());

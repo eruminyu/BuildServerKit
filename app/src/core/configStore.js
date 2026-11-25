@@ -179,7 +179,6 @@ class ConfigStore {
       path.join(SCRIPTS_DIR, 'author_map.json'),
       path.join(this.persistDir, 'author_map.json'),
       path.join(this.kitDir, 'author_map.json'),
-      path.join(this.kitDir, 'author_map.example.json'),
     ];
     for (const p of paths) {
       if (fs.existsSync(p)) {

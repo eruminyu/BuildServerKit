@@ -80,6 +80,16 @@
         return await remoteFetch('/api/p4/status');
       case 'p4:recentCLs':
         return await remoteFetch('/api/p4/recent-cls');
+      case 'p4:logs:read': {
+        const p = payload || {};
+        const qs = new URLSearchParams({
+          source: p.source || 'p4log',
+          filter: p.filter || 'all',
+          query: p.query || '',
+          tailLines: String(p.tailLines || 300),
+        });
+        return await remoteFetch(`/api/p4/server-log?${qs.toString()}`);
+      }
       case 'p4:mirrorRun':
         return await remoteFetch('/api/p4/mirror-now', { method: 'POST', body: '{}' });
       case 'system:network':

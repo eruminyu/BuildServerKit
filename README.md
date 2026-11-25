@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛠️ BuildServerKit Studio `v2.3.0`
+# 🛠️ BuildServerKit Studio `v2.4.0`
 
 **여유 노트북(또는 전용 PC) 1대를 클릭 몇 번으로 Unreal Engine 5 올인원 빌드 서버로 만들어 주는 데스크톱 매니저**  
 *Perforce 하이브리드 자동 미러링 · GUI 원클릭 P4 서버 세팅 · GitHub Actions Self-Hosted Runner · 팀원 GitHub 프로필 연동 · 패키지 자동 보관 정리 · Discord/Slack 리포트 · Tailscale 원격 웹 대시보드*
@@ -63,6 +63,8 @@ flowchart LR
 
 ## ✨ 주요 기능
 
+* **📜 Perforce 서버 로그 기록 & 실시간 접속 진단 뷰어 (`v2.4.0` 신규!):** `[Perforce 서버 로그]` 탭에서 Windows 서비스 레지스트리(`P4ROOT`/`P4LOG`)와 `p4 info`를 자동 탐지해 **P4D 서버 로그·로그인/인증 실패·네트워크 에러·최근 접속 클라이언트 IP 현황**을 실시간 필터링·검색합니다. `p4 configure` 구조화 로그 자동 로테이션(`auth.csv` / `errors.csv`) 설정, 스튜디오 감사 로그(`C:\BuildArchive\P4ServerLogs\`) 자동 기록, 진단 스냅샷 저장을 지원합니다.
+* **🛡️ 관리자 12시간 세션 만료 자동 보호 & 비밀번호 미설정 계정 감지 (`v2.4.0`):** Perforce 기본 12시간 관리자 티켓이 만료돼도 무기한 `p4bot` 티켓으로 **팀원 목록·P4 이메일·파이프라인 연결 상태(Stream/Typemap/워크스페이스)를 끊김 없이 표시**하고, 인라인 **관리자 빠른 재로그인 · 12시간 만료 해제(`team_long_session`) · `⚠ 비번 미설정` 배지**를 제공합니다.
 * **✨ 최초 실행 5단계 설정 마법사 & PC 환경 자동 진단:** 새 PC에서 처음 실행하면 **UE5(`UE_5.*` 자동 탐지) · Visual Studio C++(MSVC) · Git · Perforce(CLI/P4D·Unicode·티켓) · Tailscale · RAM/SSD · Runner** 상태를 자동 진단하고, 단계별 주의사항 가이드와 원클릭 설치를 제공합니다.
 * **📦 빈 UE5 프로젝트 원클릭 생성기 + Perforce `CL #1` 자동 Submit (`v2.3.0` 신규!):** 사용자 PC에 **실제로 설치된 UE5 버전 목록 중에서만 선택**해 공식 `TP_Blank`(C++) / `TP_BlankBP`(Blueprint) 템플릿으로 캐시 0개 + `.p4ignore`/`.gitignore` 포함 정석 프로젝트를 생성하고, 원하면 관리자 계정으로 Perforce에 **`CL #1` 최초 Submit + `ws-build-full` 동기화**까지 한 번에 완료합니다 *(임시 워크스페이스 자동 삭제 · 기존 `.uproject` 덮어쓰기 차단)*.
 * **⚡ Perforce 서버 GUI 설치 & 원클릭 자동 세팅 (터미널 불필요):** `[Perforce & 미러링]` 탭에서 최신 공식 Helix Core Server(`P4D`) 자동 다운로드·설치, `winget` `Perforce.P4V` 설치, UAC Unicode 전환(`p4d -xi`), 방화벽 개방(`1666`/`3780`), GUI 관리자 로그인, 그리고 **Stream 디포 · UE5 Typemap(`+l`) · Read-Only `p4bot` 무기한 티켓 · 전용 워크스페이스 2개 · `.p4ignore`(`*.slnx`/`.vsconfig` 포함) 원클릭 일괄 구성**을 지원합니다.
@@ -255,6 +257,14 @@ p4 -p localhost:1666 -u p4bot -c ws-build-full sync -f "//...#head"
 1. `*.uproject`, `Source/<프로젝트>/` 폴더, `*.Target.cs`, `*Editor.Target.cs`, `*.Build.cs`, `*.cpp`, `*.h`의 파일명과 내부 모듈명·클래스명 + `Config/DefaultEngine.ini`의 `ActiveGameNameRedirects`를 모두 일치시켜 수정합니다.
 2. 기존 `*.sln`, `*.slnx`, `Binaries/`, `Intermediate/`, `Saved/`, `.vs/` 삭제 후 `.uproject` 우클릭 → `Generate Visual Studio project files`로 로컬 빌드 확인.
 3. P4V 루트 우클릭 → **`Reconcile Offline Work`** (`Detect moved files` + `Apply P4IGNORE` 체크) → **`Submit`** 하면 Perforce에 이동/삭제로 깔끔하게 반영됩니다.
+</details>
+
+<details>
+<summary><strong>Q9. 자고 일어났더니 팀원 계정 목록이 0/5·이메일 '미등록'으로 보이거나 파이프라인 상태가 꺼져 보입니다.</strong></summary>
+
+Perforce 기본 로그인 티켓 유효시간은 **12시간**입니다. `p4bot`은 무기한 그룹(`automation_bots`)에 속하지만, 관리자 계정이 12시간 뒤 만료되면 관리자 전용 명령이 실패합니다.
+* **`v2.4.0+`:** 관리자 세션이 만료돼도 **`p4bot` 티켓으로 팀원 목록·이메일·파이프라인 상태(Stream/Typemap/워크스페이스)가 정상 유지**되며, `[팀원 & 계정 관리]` 상단 배너에서 **관리자 빠른 재로그인** 및 **`[♾ 12시간 만료 해제]`** 버튼 한 번으로 향후 세션 만료를 영구 방지할 수 있습니다.
+* 신규 팀원이 접속 불가할 때는 **`[Perforce 서버 로그]`** 탭에서 해당 팀원의 Tailscale IP가 서버(`:1666`)에 도달하는지, 인증 실패 로그가 찍히는지, 계정에 `⚠ 비번 미설정` 배지가 떠 있는지 10초 만에 판별할 수 있습니다.
 </details>
 
 ---
