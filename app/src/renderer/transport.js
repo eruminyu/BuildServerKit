@@ -47,12 +47,29 @@
     connectSse();
   }
 
-  async function remoteFetch(url, options = {}) {
-    const resp = await fetch(url, {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-    });
+  const REMOTE_PIN_KEY = 'bsk_remote_pin';
+
+  async function remoteFetch(url, options = {}, retriedPin = false) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (method === 'POST') {
+      const savedPin = sessionStorage.getItem(REMOTE_PIN_KEY) || '';
+      if (savedPin) headers['X-BSK-Pin'] = savedPin;
+    }
+
+    const resp = await fetch(url, { ...options, headers });
     const data = await resp.json().catch(() => ({}));
+    if (resp.status === 401 && data.pinRequired && method === 'POST' && !retriedPin) {
+      const promptMsg = sessionStorage.getItem(REMOTE_PIN_KEY)
+        ? '원격 빌드 실행 PIN이 일치하지 않습니다. PIN을 다시 입력하세요:'
+        : '원격 빌드 실행 PIN을 입력하세요:';
+      const entered = window.prompt(promptMsg);
+      if (entered === null || !entered.trim()) {
+        throw new Error('원격 실행 PIN 입력이 취소되었습니다.');
+      }
+      sessionStorage.setItem(REMOTE_PIN_KEY, entered.trim());
+      return await remoteFetch(url, options, true);
+    }
     if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
     return data;
   }
@@ -94,6 +111,8 @@
         return await remoteFetch('/api/p4/mirror-now', { method: 'POST', body: '{}' });
       case 'system:network':
         return await remoteFetch('/api/network');
+      case 'build:sync':
+        return await remoteFetch('/api/build/sync', { method: 'POST', body: JSON.stringify(payload || {}) });
       case 'build:start':
         return await remoteFetch('/api/build/start', { method: 'POST', body: JSON.stringify(payload || {}) });
       case 'build:stop':

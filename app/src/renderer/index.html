@@ -21,7 +21,7 @@
             </svg>
           </div>
           <span>BuildServerKit Studio</span>
-          <span class="brand-version">v2.4.0</span>
+          <span class="brand-version">v2.4.1</span>
         </div>
         <span id="topVcsChip" class="vcs-chip">Perforce Hybrid</span>
       </div>
@@ -253,7 +253,7 @@
                 </div>
                 <div class="card-desc">새 전체 패키징(FullPackage)이 성공할 때마다 설정한 개수만 남기고 가장 오래된 패키징 폴더부터 자동으로 삭제합니다.</div>
               </div>
-              <button id="btnPruneNow" class="btn btn-sm trigger-btn">🧹 지금 오래된 빌드 정리</button>
+              <button id="btnPruneNow" class="btn btn-sm local-only">🧹 지금 오래된 빌드 정리</button>
             </div>
 
             <div class="toggle-row">
@@ -1266,6 +1266,11 @@
                 <label>원격 웹 대시보드 포트</label>
                 <input id="numWebPort" type="number" min="1024" max="65535" class="input mono" value="3780" />
               </div>
+              <div class="field full">
+                <label>원격 빌드 실행 PIN (선택 · 읽기 전용 OFF 시 적용)</label>
+                <input id="txtWebPin" type="password" class="input mono" placeholder="비워두면 Tailscale 팀원은 PIN 없이 즉시 빌드 버튼 실행 가능 (예: 1234)" />
+                <span class="field-hint">PIN을 설정하면 원격 브라우저에서 빌드/동기화/미러링 실행 시 1회 PIN 확인을 거칩니다. (설정·토큰·패키지 삭제는 항상 로컬 전용 보호)</span>
+              </div>
             </div>
 
             <div class="grid-2" style="margin-top:12px;">
@@ -1281,8 +1286,8 @@
               </div>
               <div class="toggle-row">
                 <div>
-                  <div class="toggle-label-title">팀원 읽기 전용 모드 (권장)</div>
-                  <div class="toggle-label-sub">끄면 팀원이 웹에서 빠른 검증/패키징을 원격 트리거할 수 있습니다. (토큰/설정은 항상 보호)</div>
+                  <div class="toggle-label-title">팀원 읽기 전용 모드</div>
+                  <div class="toggle-label-sub">끄면 팀원이 웹에서 빠른 검증 · 전체 패키징 · P4 동기화 · 미러링 · 중단만 실행할 수 있습니다. (설정·토큰·패키지 삭제는 항상 차단)</div>
                 </div>
                 <label class="switch">
                   <input id="chkWebReadOnly" type="checkbox" checked />

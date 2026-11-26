@@ -1,13 +1,25 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const {
   detectNetworkIPs,
   getPackageArchiveSummary,
-  applyPackageRetention,
   getBuildHistory,
   readBuildLogFile,
 } = require('./systemService');
+
+function extractClientIp(req) {
+  const raw = (req.socket && req.socket.remoteAddress) || '';
+  return raw.replace(/^::ffff:/, '') || 'unknown';
+}
+
+function timingSafePinEquals(provided, expected) {
+  const a = Buffer.from(String(provided || ''), 'utf8');
+  const b = Buffer.from(String(expected || ''), 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -70,6 +82,7 @@ class RemoteWebServer {
           port: this.port,
           url,
           readOnly: Boolean(cfg.RemoteWebDashboardReadOnly),
+          pinRequired: Boolean(cfg.RemoteWebDashboardPin),
         });
         resolve({ running: true, url, port: this.port });
         return;
@@ -93,9 +106,10 @@ class RemoteWebServer {
             port: this.port,
             url,
             readOnly: Boolean(cfg.RemoteWebDashboardReadOnly),
+            pinRequired: Boolean(cfg.RemoteWebDashboardPin),
           });
           this.stateHub.appendLog(
-            `🌐 [Tailscale 원격 웹 대시보드 가동] ${url} (${cfg.RemoteWebDashboardReadOnly ? '읽기 전용' : '원격 빌드 허용'})`,
+            `🌐 [Tailscale 원격 웹 대시보드 가동] ${url} (${cfg.RemoteWebDashboardReadOnly ? '읽기 전용' : cfg.RemoteWebDashboardPin ? '원격 빌드 허용 · PIN 보호' : '원격 빌드 허용'})`,
             'cyan'
           );
           resolve({ running: true, url, port: this.port });
@@ -143,6 +157,7 @@ class RemoteWebServer {
         ...this.stateHub.getSnapshot(),
         remoteMode: true,
         readOnly: Boolean(cfg.RemoteWebDashboardReadOnly),
+        pinRequired: Boolean(cfg.RemoteWebDashboardPin),
       });
     }
     if (pathname === '/api/config' && req.method === 'GET') {
@@ -187,30 +202,49 @@ class RemoteWebServer {
       return sendJson(res, 200, detectNetworkIPs());
     }
 
-    // Remote trigger endpoints (blocked in Read-Only mode!)
+    // Remote trigger endpoints (blocked in Read-Only mode, optional PIN verified!)
     if (pathname.startsWith('/api/') && req.method === 'POST') {
       if (cfg.RemoteWebDashboardReadOnly) {
-        return sendJson(res, 403, { error: '원격 웹 대시보드가 읽기 전용 모드입니다. 전용 PC 앱에서 제어하세요.' });
+        return sendJson(res, 403, { error: '원격 웹 대시보드가 읽기 전용 모드입니다. 전용 PC 앱에서 [읽기 전용 모드]를 끄면 원격 빌드를 실행할 수 있습니다.' });
       }
+      const expectedPin = String(cfg.RemoteWebDashboardPin || '').trim();
+      if (expectedPin) {
+        const providedPin = String(req.headers['x-bsk-pin'] || '').trim();
+        if (!providedPin || !timingSafePinEquals(providedPin, expectedPin)) {
+          return sendJson(res, 401, {
+            error: providedPin ? '원격 실행 PIN이 일치하지 않습니다.' : '원격 실행 PIN 입력이 필요합니다.',
+            pinRequired: true,
+          });
+        }
+      }
+
+      const clientIp = extractClientIp(req);
       const body = await readBodyJson(req);
       try {
+        if (pathname === '/api/build/sync') {
+          this.stateHub.appendLog(`🌐 [원격 요청 ${clientIp}] 소스 최신 동기화 시작`, 'cyan');
+          const r = await this.buildService.syncSource(body.branch || '', body.targetCL || '');
+          return sendJson(res, 200, r);
+        }
         if (pathname === '/api/build/start') {
-          this.buildService.startBuild(body.mode || 'QuickVerify', body).catch((e) => {
+          const mode = body.mode === 'FullPackage' ? 'FullPackage' : 'QuickVerify';
+          this.stateHub.appendLog(`🌐 [원격 요청 ${clientIp}] ${mode} 빌드 실행 요청`, 'cyan');
+          this.buildService.startBuild(mode, body).catch((e) => {
             this.stateHub.appendLog(`[원격 빌드 오류] ${e.message}`, 'error');
           });
-          return sendJson(res, 200, { ok: true, started: true });
+          return sendJson(res, 200, { ok: true, started: true, mode });
         }
         if (pathname === '/api/build/stop') {
+          this.stateHub.appendLog(`🌐 [원격 요청 ${clientIp}] 빌드 중단 요청`, 'warn');
           return sendJson(res, 200, this.buildService.stopBuild());
         }
         if (pathname === '/api/p4/mirror-now') {
+          this.stateHub.appendLog(`🌐 [원격 요청 ${clientIp}] P4 → GitHub 미러링 실행 요청`, 'cyan');
           const r = await this.p4Service.runMirrorOnce();
           return sendJson(res, 200, r);
         }
         if (pathname === '/api/packages/prune') {
-          const r = applyPackageRetention(cfg);
-          this.stateHub.broadcast('packages:updated', getPackageArchiveSummary(cfg));
-          return sendJson(res, 200, r);
+          return sendJson(res, 403, { error: '오래된 패키지 삭제는 안전을 위해 전용 빌드 PC 데스크톱 앱에서만 실행할 수 있습니다.' });
         }
       } catch (e) {
         return sendJson(res, 400, { error: e.message });

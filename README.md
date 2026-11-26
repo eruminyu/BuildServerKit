@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛠️ BuildServerKit Studio `v2.4.0`
+# 🛠️ BuildServerKit Studio `v2.4.1`
 
 **여유 노트북(또는 전용 PC) 1대를 클릭 몇 번으로 Unreal Engine 5 올인원 빌드 서버로 만들어 주는 데스크톱 매니저**  
 *Perforce 하이브리드 자동 미러링 · GUI 원클릭 P4 서버 세팅 · GitHub Actions Self-Hosted Runner · 팀원 GitHub 프로필 연동 · 패키지 자동 보관 정리 · Discord/Slack 리포트 · Tailscale 원격 웹 대시보드*
@@ -72,7 +72,7 @@ flowchart LR
 * **🔄 안정적인 Windows PowerShell 5.1 미러링 & Runner 실행:** 모든 `git`/`p4`/`robocopy` 호출의 stderr 오탐 방지, 워크플로우 `-ExecutionPolicy Bypass` 내장, 작업 스케줄러 등록 여부 실시간 배지 표시(**`SCHED`** / **`스케줄러 ON`**), 포터블 `.exe` 업그레이드 시 `C:\BuildSystem\Scripts\` 자동 스크립트 최신화를 지원합니다.
 * **🎨 아티스트 에셋 Submit 잔디 & 자동 쿠킹 검증:** `Content/` 대용량 바이너리는 GitHub에 올리지 않고 `.p4-sync/asset_changelog.md`에 1줄 요약으로 기록해 **아티스트 GitHub 잔디와 자동 쿠킹 검증**을 모두 연결합니다.
 * **📦 패키징 보관 개수 제한 (기본 10개) & 30KB 옵션 런처 동봉:** `[패키징 & 보관 관리]`에서 토글/유지 개수를 제어하며, 패키징 성공 시 그래픽 프리셋·해상도·창모드 런처(`_Launcher.exe`)를 자동 동봉합니다.
-* **💬 Discord Webhook & Slack 리포트 + 🌐 Tailscale 원격 웹 대시보드 (`:3780`) + 🖥️ 24시간 트레이 상주.**
+* **💬 Discord Webhook & Slack 리포트 + 🌐 Tailscale 원격 웹 대시보드 (`:3780`) + 🖥️ 24시간 트레이 상주:** `[알림 · 네트워크 · 설정]`에서 `팀원 읽기 전용 모드`를 끄면 팀원이 웹 브라우저에서 **빠른 검증 · 전체 패키징 · P4 동기화 · 미러링 · 중단**만 원격 실행할 수 있습니다 *(설정·토큰·패키지 삭제는 항상 로컬 전용 보호 · 선택형 원격 실행 PIN 및 요청자 IP 콘솔 기록 지원)*.
 
 ---
 

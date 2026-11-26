@@ -53,6 +53,7 @@ const DEFAULT_CONFIG = {
   RemoteWebDashboardEnabled: false,
   RemoteWebDashboardPort: 3780,
   RemoteWebDashboardReadOnly: true,
+  RemoteWebDashboardPin: '',
   MinimizeToTrayOnClose: true,
 };
 
@@ -136,6 +137,7 @@ class ConfigStore {
     safe.SlackBotToken = safe.SlackBotToken ? '••••••••' : '';
     safe.DiscordWebhookUrl = safe.DiscordWebhookUrl ? '••••••••' : '';
     safe.RunnerToken = safe.RunnerToken ? '••••••••' : '';
+    safe.RemoteWebDashboardPin = safe.RemoteWebDashboardPin ? '••••' : '';
     return safe;
   }
 

@@ -6,6 +6,7 @@
   let appState = null;
   let remoteMode = !api.isElectron;
   let readOnlyMode = false;
+  let remotePinRequired = false;
 
   let consoleLines = [];
   let errorLines = [];
@@ -123,19 +124,26 @@
   function applyRemoteRestrictions() {
     if (!remoteMode) return;
     document.body.classList.add('remote-mode');
-    $('remoteModeBadge').textContent = readOnlyMode ? '읽기 전용 모드' : '원격 빌드 허용 모드';
+    $('remoteModeBadge').textContent = readOnlyMode
+      ? '읽기 전용 모드'
+      : remotePinRequired
+        ? '원격 빌드 허용 (PIN 보호)'
+        : '원격 빌드 허용 모드';
     $('remoteModeBadge').className = readOnlyMode ? 'badge badge-blue' : 'badge badge-amber';
 
     document.querySelectorAll('.local-only').forEach((el) => {
       el.disabled = true;
       el.title = '전용 빌드 PC 데스크톱 앱에서만 변경할 수 있습니다.';
     });
-    if (readOnlyMode) {
-      document.querySelectorAll('.trigger-btn').forEach((el) => {
+    document.querySelectorAll('.trigger-btn').forEach((el) => {
+      if (readOnlyMode) {
         el.disabled = true;
-        el.title = '원격 웹 대시보드가 읽기 전용 모드입니다.';
-      });
-    }
+        el.title = '원격 웹 대시보드가 읽기 전용 모드입니다. 빌드 PC 앱에서 [팀원 읽기 전용 모드]를 끄면 사용할 수 있습니다.';
+      } else {
+        el.disabled = false;
+        el.title = remotePinRequired ? '원격 빌드 허용 (PIN 확인 후 실행)' : '원격 빌드 실행 가능';
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -202,6 +210,7 @@
     $('numWebPort').value = cfg.RemoteWebDashboardPort || 3780;
     $('chkWebEnabled').checked = Boolean(cfg.RemoteWebDashboardEnabled);
     $('chkWebReadOnly').checked = cfg.RemoteWebDashboardReadOnly !== false;
+    if ($('txtWebPin')) $('txtWebPin').value = cfg.RemoteWebDashboardPin || '';
     if ($('chkMinimizeToTray')) $('chkMinimizeToTray').checked = cfg.MinimizeToTrayOnClose !== false;
     $('txtUE5Root').value = cfg.UE5Root || '';
     $('txtProjectDir').value = cfg.ProjectDir || '';
@@ -263,6 +272,7 @@
       RemoteWebDashboardPort: Number($('numWebPort').value) || 3780,
       RemoteWebDashboardEnabled: $('chkWebEnabled').checked,
       RemoteWebDashboardReadOnly: $('chkWebReadOnly').checked,
+      RemoteWebDashboardPin: $('txtWebPin') ? $('txtWebPin').value.trim() : '',
       MinimizeToTrayOnClose: $('chkMinimizeToTray') ? $('chkMinimizeToTray').checked : true,
       UE5Root: $('txtUE5Root').value.trim(),
       ProjectDir: $('txtProjectDir').value.trim(),
@@ -695,9 +705,11 @@
     await safeCall(() => api.invoke('build:start', { mode: 'QuickVerify', branch: $('selBranch').value || cfg.LastBranch || 'main' }));
   });
   $('btnFullPackage').addEventListener('click', async () => {
+    if (remoteMode && !confirm('원격 빌드 PC에서 전체 패키징(FullPackage)을 시작할까요?')) return;
     await safeCall(() => api.invoke('build:start', { mode: 'FullPackage', branch: $('selBranch').value || cfg.LastBranch || 'main' }));
   });
   $('btnStopBuild').addEventListener('click', async () => {
+    if (remoteMode && !confirm('현재 실행 중인 빌드를 정말 중단할까요?')) return;
     await safeCall(() => api.invoke('build:stop'), '빌드 중단 요청을 보냈습니다.');
   });
   $('btnMirrorQuick').addEventListener('click', async () => {
@@ -1076,6 +1088,11 @@
   api.on('state:update', ({ section, data }) => {
     if (!appState) return;
     appState[section] = data;
+    if (section === 'webServer' && remoteMode && data) {
+      readOnlyMode = Boolean(data.readOnly);
+      remotePinRequired = Boolean(data.pinRequired);
+      applyRemoteRestrictions();
+    }
     renderState();
   });
   api.on('console:line', (entry) => appendLineToDom(entry, false));
@@ -2702,6 +2719,7 @@
       errorLines = snap.errorLines || [];
       remoteMode = Boolean(snap.remoteMode);
       readOnlyMode = Boolean(snap.readOnly);
+      remotePinRequired = Boolean(snap.pinRequired);
     }
 
     const loadedCfg = await safeCall(() => api.invoke('config:get'));
